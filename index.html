@@ -1,10 +1,17 @@
 <!DOCTYPE html>
 <!--
   Elpriskoll
-  Version: 1.7.0
+  Version: 1.8.0
   Senast ändrad: 2026-09-22
 
   Ändringslogg (senaste överst):
+  - 1.8.0 (2026-09-22): Hittade den faktiska orsaken till timupplösningen i
+    Tibber-läget: GraphQL-frågan saknade argumentet resolution: QUARTER_HOURLY
+    på priceInfo, så Tibbers API svarade bakåtkompatibelt med timpriser även
+    för hem som stöder kvartspriser. Nu begärs QUARTER_HOURLY uttryckligen.
+    Token-länken pekar åter på developer.tibber.com (startsidan) istället för
+    en ospårbar undersida, med tydligare manuella steg – ingen pålitlig
+    direktlänk till inloggningen hittades.
   - 1.7.0 (2026-09-22): "Just nu" i Tibber-läget räknas åter fram lokalt från
     today-listan (samma metod som elområdesläget), istället för Tibbers eget
     "current"-fält – bekräftat att det fältet kan ligga kvar på hel timme för
@@ -321,7 +328,7 @@ footer.legal{padding:10px 20px 40px; text-align:center; font-size:11.5px; color:
    Ingen token eller autentiseringsuppgift lagras i källkoden.
    ========================================================================= */
 
-const APP_VERSION = "1.7.0";
+const APP_VERSION = "1.8.0";
 const APP_BUILD_DATE = "2026-09-22";
 
 const TIBBER_ENDPOINT = "https://api.tibber.com/v1-beta/gql";
@@ -516,6 +523,9 @@ async function gql(token, query, variables, timeoutMs){
 
 const VALIDATE_QUERY = `query { viewer { login name } }`;
 
+// VIKTIGT: utan ett uttryckligt "resolution"-argument svarar Tibbers API med
+// timpriser (bakåtkompatibelt beteende) även för hem som stöder kvartspriser.
+// QUARTER_HOURLY måste begäras explicit för att få 15-minuterspriser.
 const PRICES_QUERY = `
 query {
   viewer {
@@ -524,7 +534,7 @@ query {
       appNickname
       address { address1 }
       currentSubscription {
-        priceInfo {
+        priceInfo(resolution: QUARTER_HOURLY) {
           current { total energy tax startsAt level }
           today { total energy tax startsAt level }
           tomorrow { total energy tax startsAt level }
@@ -1008,8 +1018,8 @@ function renderConnectTibber(){
           <input type="password" id="token-input" name="token" autocomplete="off" spellcheck="false" placeholder="Klistra in din token här" required>
           <div class="hint">
             Har du ingen token än?
-            <a href="https://developer.tibber.com/settings/accesstoken" target="_blank" rel="noopener">Öppna Tibbers utvecklarportal ↗</a>
-            – om du inte kommer direkt till inloggningen: logga in med ditt Tibber-konto, klicka på ditt namn uppe till höger, välj <strong>Developer settings</strong> och sedan <strong>Generate Access Token</strong>. Token skickas endast till Tibbers API och sparas lokalt i din webbläsare.
+            <a href="https://developer.tibber.com/" target="_blank" rel="noopener">Öppna Tibbers utvecklarportal ↗</a>
+            och logga in med ditt Tibber-konto. Klicka sedan på ditt namn/profil uppe till höger och leta upp <strong>Access Tokens</strong> (ibland under "Developer settings") för att skapa och kopiera din token. Token skickas endast till Tibbers API och sparas lokalt i din webbläsare.
           </div>
           ${state.connectError ? `<div class="error-text" role="alert">${escapeHtml(state.connectError)}</div>` : ""}
         </div>
@@ -1529,12 +1539,4 @@ function iconGear(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="curren
 function iconClose(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`; }
 function iconRefresh(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 10-2.7 6.4M21 5v6h-6"/></svg>`; }
 function iconClock(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>`; }
-function iconCheck(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>`; }
-function iconInfo(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>`; }
-function iconShield(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>`; }
-
-/* ---------------------------- Init ---------------------------- */
-boot();
-</script>
-</body>
-</html>
+function iconCheck(){ return `<svg viewB
