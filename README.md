@@ -98,6 +98,122 @@ backend-steg behövs – hela appen körs i användarens webbläsare.
   (Vad kostar elen nu? Är priset bra eller dåligt? När blir det
   billigare?), stöd för både ljust och mörkt tema (samt systemval).
 
+## Läge utan Tibber-inloggning (tillägg utöver kravspecen)
+
+Utöver Tibber-inloggningen finns numera även ett läge helt **utan konto eller
+token**: användaren väljer sitt elområde (SE1–SE4), antingen manuellt eller
+via "Använd min plats" (webbläsarens platstjänst, som bara används lokalt för
+att gissa elområde – inga koordinater skickas någonstans). Priserna hämtas då
+från det öppna, kostnadsfria API:et [elprisetjustnu.se](https://www.elprisetjustnu.se/elpris-api),
+som levererar Nord Pool-spotpriset per elområde. Appen räknar upp med 25%
+för att uppskatta moms, så att talen ska bli jämförbara med Tibbers `total`.
+
+Tänk på att detta är en **approximation**:
+- Priset gäller hela elområdet, inte din exakta adress.
+- Det motsvarar inte nödvändigtvis vad du faktiskt betalar, t.ex. om du har
+  fastprisavtal eller ett annat påslag än ren spotprisvidarefakturering.
+- "Använd min plats" använder en enkel breddgradsindelning som grov
+  uppskattning – elområdenas riktiga gränser följer länsgränser, inte en rak
+  linje, så nära gränserna kan gissningen bli fel. Användaren kan alltid välja
+  elområde manuellt istället.
+
+Detta läge kräver ingen inloggning alls och är därför i praktiken ännu
+enklare ur säkerhetssynpunkt än Tibber-läget (inga hemligheter att hantera).
+Om appen visas publikt anger den källan "Elpriser tillhandahålls av Elpriset
+just nu.se", i linje med deras användarvillkor.
+
+**Priser inkl. skatter och moms:** elprisetjustnu.se levererar rent spotpris
+(exkl. skatt och moms). Appen räknar därför upp priset med svensk energiskatt
+på el (36,0 öre/kWh, 2026 års standardnivå) och därefter 25% moms, för att
+likna en vanlig elräkning och vara jämförbart med Tibbers `total`-fält.
+Observera att hushåll i vissa kommuner i norra Sverige har en lägre
+energiskatt (ca 9,6 öre/kWh lägre) – det tas inte hänsyn till, så priset kan
+bli något för högt där. Nätavgift och elhandlarens eventuella påslag ingår
+aldrig, eftersom det inte finns någon öppen, nationell källa för det.
+
+Utöver elområdesknappar och platsknapp går det även att ange sitt
+**postnummer**, som slås upp mot en enkel, inbyggd tabell (byggd på PostNords
+postnummerintervall) för att gissa elområde. Precis som platsgissningen är
+detta en approximation, särskilt nära en elområdesgräns — inget postnummer
+sparas eller skickas till någon server.
+
+## "Just nu"-rutan och tidsupplösning
+
+Grundorsaken till att Tibber-läget visade timpriser hittades till slut:
+Tibbers GraphQL-API svarar bakåtkompatibelt med **timpriser** om frågan inte
+uttryckligen begär `resolution: QUARTER_HOURLY` på `priceInfo` – oavsett om
+hemmet egentligen stöder kvartspriser. Frågan i appen begär nu det argumentet
+explicit, så `today`/`tomorrow`/`current` bör komma i kvartsupplösning för
+konton som stöder det.
+
+Utöver det räknas aktuell period fram lokalt från `today`-prislistan i BÅDA
+lägena (samma metod som elområdesläget alltid använt), istället för att i
+Tibber-läget lita på Tibbers eget `current`-fält, som visade sig kunna ligga
+kvar på hel timme oavsett upplösning på `today`-listan.
+
+## Automatisk uppdatering i takt med prisperioderna
+
+Utöver det uppdateringsintervall som går att ställa in (1–60 min) uppdateras
+priset alltid automatiskt **en minut efter varje ny prisperiod** (xx:01,
+xx:16, xx:31, xx:46), oavsett vilket intervall som valts. Det garanterar att
+"just nu"-rutan hänger med i takt med att nya kvartspriser börjar gälla, med
+en liten säkerhetsmarginal så att källan garanterat hunnit uppdatera sig.
+
+## Källhänvisning i elområdesläget
+
+När appen körs utan Tibber-inloggning visas nu en tydlig ruta direkt under
+"just nu"-kortet på startsidan (inte bara i inställningarna) som anger att
+priset kommer från elprisetjustnu.se för valt elområde, samt en påminnelse om
+att det faktiska priset kan skilja sig beroende på elbolag, avtalstyp (t.ex.
+fastpris), nätavgift och eventuellt påslag.
+
+## Cache, nollställning och autosparade inställningar
+
+- Sidan skickar med `Cache-Control: no-cache`-metataggar, så en vanlig
+  omladdning alltid hämtar senaste versionen av `index.html` – ingen manuell
+  cacherensning ska behövas efter en uppdatering.
+- Inställningar (gränsvärden, texter, enhet, uppdateringsintervall, tema)
+  sparas nu direkt när du ändrar dem, utan en separat "Spara"-knapp.
+- Under inställningarnas "Farlig zon" finns en knapp **Nollställ allt** som
+  raderar all sparad data (token/elområde, inställningar, cachade priser) och
+  startar om appen helt – bra att använda om något känns fastlåst.
+- Startsidan visar en välkomstruta första gången, som länkar till
+  inställningarna, tills den stängs eller inställningarna ändras.
+- "Koppla från" syns nu även direkt under rubriken på startsidan, inte bara
+  inne i inställningarna.
+
+## GitHub Pages och Jekyll
+
+Repot innehåller en tom fil `.nojekyll` i roten. Utan den kör GitHub Pages
+filerna genom Jekyll (statisksidegenerator) som standard, vilket normalt
+inte stör en enkel `index.html`, men kan i sällsynta fall ge oväntat
+beteende för större, komplexa enfilsappar. `.nojekyll` stänger av det helt,
+vilket är standardrekommendationen för statiska HTML/JS-appar som denna.
+Se till att filen följer med när du pushar till GitHub (den är osynlig i
+vissa filutforskare eftersom namnet börjar med en punkt).
+
+## Versionsnumrering
+
+`index.html` inleds med en HTML-kommentar med versionsnummer, datum och en
+ändringslogg. Versionen visas också längst ner på anslutningsskärmen och i
+inställningarna, så det går att bekräfta i webbläsaren vilken build som
+faktiskt körs (bra att kontrollera vid cacheproblem efter en uppdatering —
+gör i så fall en hård omladdning, Ctrl/Cmd+Shift+R).
+
+## Grafen i prisöversikten
+
+Stapeldiagrammet visar nu klockslag under varje hel timme, oavsett om
+prisdatan kommer i timupplösning (24 perioder/dygn) eller kvartsupplösning
+(96 perioder/dygn, vilket Tibber stödjer sedan de började leverera
+15-minuterspriser). En liten etikett ovanför grafen visar vilken upplösning
+den aktuella dagens data faktiskt har, och priset (i vald enhet) står nu även
+utskrivet ovanför varje stapel.
+
+För fliken "Idag" visas prisöversikten (både graf och lista) numera från och
+med innevarande period och framåt, inte från midnatt — redan passerade
+timmar döljs. Fliken "Imorgon" visar som vanligt hela dygnet, eftersom det
+alltid ligger i framtiden.
+
 ## Begränsningar / naturliga nästa steg
 
 - Tokenen lagras i klartext i webbläsarens `localStorage`, i linje med

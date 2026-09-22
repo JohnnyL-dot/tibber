@@ -1,10 +1,17 @@
 <!DOCTYPE html>
 <!--
   Elpriskoll
-  Version: 1.9.1
+  Version: 1.9.2
   Senast ändrad: 2026-09-22
 
   Ändringslogg (senaste överst):
+  - 1.9.2 (2026-09-22): Versionsnumret visas nu även på själva översikten
+    (inte bara anslutningsskärmen och inställningarna), som stöd för
+    felsökning. Lade till en .nojekyll-fil i repot – utan den kör GitHub
+    Pages filen genom Jekyll som standard, vilket i sällsynta fall kan ge
+    inkonsekvent beteende för statiska enfilsappar som denna. Fyra fullständiga
+    körscenarier (anslutningsskärm, Tibber-läge, elområdesläge, anpassade
+    inställningar) testkörda i simulerad webbläsarmiljö utan fel.
   - 1.9.1 (2026-09-22): Städade bort en dubbel sidnavigering i "Nollställ
     allt" (satte både location.href och anropade reload() – kunde ge
     oförutsägbart beteende i vissa webbläsare). Hela appflödet testkört i en
@@ -339,7 +346,7 @@ footer.legal{padding:10px 20px 40px; text-align:center; font-size:11.5px; color:
    Ingen token eller autentiseringsuppgift lagras i källkoden.
    ========================================================================= */
 
-const APP_VERSION = "1.9.1";
+const APP_VERSION = "1.9.2";
 const APP_BUILD_DATE = "2026-09-22";
 
 const TIBBER_ENDPOINT = "https://api.tibber.com/v1-beta/gql";
@@ -1212,6 +1219,7 @@ function renderHome(){
       <div class="card" style="text-align:center; padding:40px 22px; color:var(--text-dim);">
         ${state.refreshing ? "Hämtar aktuellt elpris …" : "Ingen prisdata tillgänglig ännu."}
       </div>
+      <div style="text-align:center; margin-top:22px; font-size:11.5px; color:var(--text-faint);">Version ${APP_VERSION} (${APP_BUILD_DATE})</div>
     </main>`;
   }
 
@@ -1275,6 +1283,7 @@ function renderHome(){
       ${renderChartAndList(state.activeDay === "tomorrow" && hasTomorrow ? data.tomorrow : periodsFromNow(data.today, data.current), settings, data.current)}
     </div>
     ${state.mode === "zone" ? `<div class="hint" style="text-align:center; margin-top:14px;">Källa: <a href="https://www.elprisetjustnu.se" target="_blank" rel="noopener">elprisetjustnu.se</a>, elområde ${escapeHtml(zoneLabel(state.zone))}.</div>` : ""}
+    <div style="text-align:center; margin-top:22px; font-size:11.5px; color:var(--text-faint);">Version ${APP_VERSION} (${APP_BUILD_DATE})</div>
   </main>`;
 }
 
