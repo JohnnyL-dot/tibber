@@ -130,6 +130,7 @@ main{flex:1; padding:4px 20px 48px;}
 .field{margin-bottom:18px;}
 .field label{display:block; font-size:13.5px; font-weight:600; margin-bottom:7px; color:var(--text-dim);}
 .field .hint{font-size:12.5px; color:var(--text-faint); margin-top:6px; line-height:1.5;}
+.field .hint a{color:var(--text); font-weight:700; text-decoration:underline; text-decoration-color:var(--accent); text-decoration-thickness:2px; text-underline-offset:2px;}
 input[type=text], input[type=password], input[type=number], select{
   width:100%; padding:12px 14px; border-radius:12px; border:1px solid var(--border);
   background:var(--bg-2); color:var(--text); font-size:15px; font-family:inherit;
@@ -487,8 +488,12 @@ async function fetchPrices(token){
    svenskt elområde. Ingen inloggning krävs. Priset är detsamma för alla i samma elområde
    och motsvarar därför INTE nödvändigtvis exakt vad en enskild Tibber-kund betalar (t.ex.
    om kontot har fastpris eller ett annat påslag än ren spotprisvidarefakturering).
-   API:t levererar pris exklusive moms – vi räknar upp med 25% för att bli jämförbart med
-   Tibbers "total" (energi + skatt). */
+   API:t levererar rent spotpris exklusive skatt och moms. För att bli jämförbart med
+   Tibbers "total" (energi + skatt, inkl. moms) lägger vi på svensk energiskatt på el och
+   räknar sedan upp hela summan med 25% moms – precis som på en vanlig elräkning. */
+const ELSKATT_ORE = 36.0; // öre/kWh exkl. moms, 2026 års standardnivå (Skatteverket/Ekonomifakta).
+                            // Hushåll i vissa kommuner i norra Sverige har ca 9,6 öre lägre skatt –
+                            // det tas inte hänsyn till här, vilket gör uppskattningen något hög där.
 function zoneFromCoords(lat){
   // Grov approximation baserad på breddgrad. Elområdenas riktiga gränser följer läns-
   // gränser (inte räta linjer), så detta är en uppskattning – inte en exakt uppslagning.
@@ -552,7 +557,7 @@ async function fetchZoneDay(zone, date){
   try{ arr = await res.json(); }
   catch(e){ throw {kind:"parse", message:"Kunde inte tolka svaret från elprisetjustnu.se."}; }
   return arr.map(p => ({
-    total: p.SEK_per_kWh * 1.25,
+    total: (p.SEK_per_kWh + ELSKATT_ORE / 100) * 1.25,
     startsAt: p.time_start,
     endsAt: p.time_end
   }));
@@ -882,7 +887,12 @@ function renderConnectTibber(){
         <div class="field">
           <label for="token-input">Tibber API-token</label>
           <input type="password" id="token-input" name="token" autocomplete="off" spellcheck="false" placeholder="Klistra in din token här" required>
-          <div class="hint">Hämta din personliga token på <strong>developer.tibber.com</strong>. Token skickas endast till Tibbers API och sparas lokalt i din webbläsare.</div>
+          <div class="hint">
+            Har du ingen token än? Hämta den på
+            <a href="https://developer.tibber.com/" target="_blank" rel="noopener">developer.tibber.com ↗</a> –
+            logga in med ditt Tibber-konto, gå till <strong>Developer settings</strong> och skapa/kopiera din
+            <strong>Access Token</strong>. Token skickas endast till Tibbers API och sparas lokalt i din webbläsare.
+          </div>
           ${state.connectError ? `<div class="error-text" role="alert">${escapeHtml(state.connectError)}</div>` : ""}
         </div>
         <button type="submit" class="btn btn-primary btn-block" id="connect-submit" ${state.loading ? "disabled" : ""}>
@@ -927,7 +937,7 @@ function renderConnectZone(){
       </div>
       <div class="trust-note">
         ${iconInfo()}
-        <span><strong>Ingen inloggning krävs.</strong> Priset hämtas från det öppna API:et elprisetjustnu.se och visar Nord Pool-spotpriset (inkl. uppskattad moms) för hela elområdet – inte din exakta adress. Både postnummer- och platsgissningen är grova uppskattningar, särskilt nära en elområdesgräns. Priset kan också skilja sig från vad du faktiskt betalar, t.ex. om du har fastpris eller ett annat påslag än ren spotprisvidarefakturering.</span>
+        <span><strong>Ingen inloggning krävs.</strong> Priset hämtas från det öppna API:et elprisetjustnu.se och visar Nord Pool-spotpriset för hela elområdet, uppräknat med svensk energiskatt (${ELSKATT_ORE.toFixed(1).replace(".", ",")} öre/kWh) och 25% moms – inte din exakta adress. Både postnummer- och platsgissningen är grova uppskattningar, särskilt nära en elområdesgräns, och skattenivån är densamma i hela landet trots att vissa kommuner i norr har lägre energiskatt. Priset kan också skilja sig från vad du faktiskt betalar, t.ex. om du har fastpris, nätavgift eller ett annat påslag än ren spotprisvidarefakturering.</span>
       </div>`;
 }
 
@@ -1045,7 +1055,7 @@ function renderHome(){
     <div class="card">
       ${renderChartAndList(state.activeDay === "tomorrow" && hasTomorrow ? data.tomorrow : data.today, settings, data.current)}
     </div>
-    ${state.mode === "zone" ? `<div class="hint" style="text-align:center; margin-top:14px;">Priser för ${escapeHtml(zoneLabel(state.zone))} från <a href="https://www.elprisetjustnu.se" target="_blank" rel="noopener">elprisetjustnu.se</a>, ej din exakta adress.</div>` : ""}
+    ${state.mode === "zone" ? `<div class="hint" style="text-align:center; margin-top:14px;">Priser för ${escapeHtml(zoneLabel(state.zone))} från <a href="https://www.elprisetjustnu.se" target="_blank" rel="noopener">elprisetjustnu.se</a>, inkl. uppskattad energiskatt och moms – ej din exakta adress.</div>` : ""}
   </main>`;
 }
 
@@ -1205,7 +1215,7 @@ function renderSettings(){
           </div>
           <button class="btn btn-danger" id="btn-disconnect">Koppla från</button>
         </div>
-        ${state.mode === "zone" ? `<div class="hint" style="margin-top:12px;">Baserat på elprisetjustnu.se för ditt valda elområde, inte din exakta adress eller ditt faktiska Tibber-pris.</div>` : ""}
+        ${state.mode === "zone" ? `<div class="hint" style="margin-top:12px;">Baserat på elprisetjustnu.se för ditt valda elområde, inkl. uppskattad energiskatt och moms. Inte din exakta adress eller ditt faktiska elpris.</div>` : ""}
         ${state.mode === "tibber" && homes.length > 1 ? `
         <div class="field" style="margin-top:16px;">
           <label for="home-select">Hem</label>
