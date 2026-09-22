@@ -260,9 +260,22 @@ footer.legal{padding:10px 20px 40px; text-align:center; font-size:11.5px; color:
    ========================================================================= */
 
 const TIBBER_ENDPOINT = "https://api.tibber.com/v1-beta/gql";
+const ZONE_API_BASE = "https://www.elprisetjustnu.se/api/v1/prices";
 const LS_TOKEN = "elpriskoll.token.v1";
+const LS_ZONE = "elpriskoll.zone.v1";
 const LS_SETTINGS = "elpriskoll.settings.v1";
 const LS_CACHE = "elpriskoll.cache.v1";
+
+const ELOMRADEN = [
+  {id:"SE1", name:"Norra Sverige", hint:"t.ex. Luleå, Kiruna"},
+  {id:"SE2", name:"Norra Mellansverige", hint:"t.ex. Sundsvall, Östersund"},
+  {id:"SE3", name:"Södra Mellansverige", hint:"t.ex. Stockholm, Göteborg"},
+  {id:"SE4", name:"Södra Sverige", hint:"t.ex. Malmö, Karlskrona"}
+];
+function zoneLabel(id){
+  const z = ELOMRADEN.find(z => z.id === id);
+  return z ? z.id + " – " + z.name : id;
+}
 
 const DEFAULT_SETTINGS = {
   greenMax: 100,      // öre/kWh, övre gräns för grönt
@@ -279,7 +292,11 @@ const DEFAULT_SETTINGS = {
 /* ---------------------------- State ---------------------------- */
 const state = {
   view: "loading",           // loading | connect | home | settings
+  mode: null,                 // "tibber" | "zone" | null
+  connectTab: "tibber",       // which tab is active on the connect screen
   token: null,
+  zone: null,
+  geoLoading: false,
   settings: loadSettings(),
   data: null,                // { homes:[...], homeId, current, today:[], tomorrow:[] }
   lastUpdated: null,
@@ -313,6 +330,15 @@ function saveToken(t){
 }
 function clearToken(){
   localStorage.removeItem(LS_TOKEN);
+}
+function loadZone(){
+  try{ return localStorage.getItem(LS_ZONE) || null; }catch(e){ return null; }
+}
+function saveZone(z){
+  localStorage.setItem(LS_ZONE, z);
+}
+function clearZone(){
+  localStorage.removeItem(LS_ZONE);
 }
 function loadCache(){
   try{
@@ -456,6 +482,101 @@ async function fetchPrices(token){
   return homes;
 }
 
+/* ---------------------------- Elområde (utan Tibber-inloggning) ----------------------------
+   Källa: elprisetjustnu.se – ett öppet, kostnadsfritt API för Nord Pool-spotpriser per
+   svenskt elområde. Ingen inloggning krävs. Priset är detsamma för alla i samma elområde
+   och motsvarar därför INTE nödvändigtvis exakt vad en enskild Tibber-kund betalar (t.ex.
+   om kontot har fastpris eller ett annat påslag än ren spotprisvidarefakturering).
+   API:t levererar pris exklusive moms – vi räknar upp med 25% för att bli jämförbart med
+   Tibbers "total" (energi + skatt). */
+function zoneFromCoords(lat){
+  // Grov approximation baserad på breddgrad. Elområdenas riktiga gränser följer läns-
+  // gränser (inte räta linjer), så detta är en uppskattning – inte en exakt uppslagning.
+  if(lat >= 63.8) return "SE1";
+  if(lat >= 61.0) return "SE2";
+  if(lat >= 58.2) return "SE3";
+  return "SE4";
+}
+
+// Grov uppslagning postnummerprefix (tre första siffrorna) -> elområde, baserad på
+// PostNords postorter per postnummerintervall. Länsgränser (och därmed elområdes-
+// gränser) följer inte postnummerintervallen exakt, så detta är en uppskattning –
+// inte en officiell källa. Användaren kan alltid välja elområde manuellt istället.
+const POSTNUMMER_ZONER = [
+  {max: 199, zone: "SE3"}, // Stockholm m.fl.
+  {max: 297, zone: "SE4"}, // Malmö, Helsingborg, Ystad, Hässleholm, Kristianstad
+  {max: 398, zone: "SE4"}, // Halmstad, Växjö, Karlskrona, Kalmar
+  {max: 475, zone: "SE3"}, // Göteborg m.fl.
+  {max: 549, zone: "SE3"}, // Borås, Skövde, Mariestad
+  {max: 589, zone: "SE3"}, // Jönköping, Linköping
+  {max: 659, zone: "SE3"}, // Norrköping, Nyköping, Strängnäs, Karlstad
+  {max: 780, zone: "SE3"}, // Örebro, Västerås, Uppsala m.fl.
+  {max: 829, zone: "SE2"}, // Borlänge, Falun, Gävle
+  {max: 899, zone: "SE2"}, // Östersund, Sundsvall
+  {max: 999, zone: "SE1"}  // Umeå, Luleå, övre Norrland
+];
+function zoneFromPostnummer(input){
+  const digits = String(input || "").replace(/\D/g, "");
+  if(digits.length < 3) return null;
+  const prefix = parseInt(digits.slice(0, 3), 10);
+  for(const r of POSTNUMMER_ZONER){
+    if(prefix <= r.max) return r.zone;
+  }
+  return null;
+}
+async function fetchZoneDay(zone, date){
+  const y = date.getFullYear();
+  const m = String(date.getMonth()+1).padStart(2,"0");
+  const d = String(date.getDate()).padStart(2,"0");
+  const url = `${ZONE_API_BASE}/${y}/${m}-${d}_${zone}.json`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  let res;
+  try{
+    res = await fetch(url, {signal: ctrl.signal});
+  }catch(networkErr){
+    clearTimeout(timer);
+    if(networkErr.name === "AbortError"){
+      throw {kind:"timeout", message:"Anslutningen till elprisetjustnu.se tog för lång tid."};
+    }
+    throw {kind:"network", message:"Kunde inte nå elprisetjustnu.se. Kontrollera din internetanslutning."};
+  }
+  clearTimeout(timer);
+  if(res.status === 404){
+    throw {kind:"notfound", message:"Priser för den här dagen är inte publicerade än."};
+  }
+  if(!res.ok){
+    throw {kind:"http", message:"Kunde inte hämta priser (fel " + res.status + "). Försök igen om en liten stund."};
+  }
+  let arr;
+  try{ arr = await res.json(); }
+  catch(e){ throw {kind:"parse", message:"Kunde inte tolka svaret från elprisetjustnu.se."}; }
+  return arr.map(p => ({
+    total: p.SEK_per_kWh * 1.25,
+    startsAt: p.time_start,
+    endsAt: p.time_end
+  }));
+}
+async function fetchZonePrices(zone){
+  const now = new Date();
+  const today = await fetchZoneDay(zone, now);
+  let tomorrow = [];
+  try{
+    const t = new Date(now);
+    t.setDate(t.getDate() + 1);
+    tomorrow = await fetchZoneDay(zone, t);
+  }catch(e){
+    tomorrow = []; // inte publicerat än – hanteras som "imorgondagens priser saknas"
+  }
+  const nowMs = now.getTime();
+  let current = today.find(p => nowMs >= new Date(p.startsAt).getTime() && nowMs < new Date(p.endsAt).getTime());
+  if(!current){
+    const past = today.filter(p => new Date(p.startsAt).getTime() <= nowMs);
+    current = past.length ? past[past.length - 1] : today[0];
+  }
+  return {today, tomorrow, current: current || null};
+}
+
 /* ---------------------------- Data helpers ---------------------------- */
 function pickHome(homes, homeId){
   if(homeId){
@@ -497,12 +618,17 @@ function currentPeriodKey(period){
 async function boot(){
   applyTheme();
   state.token = loadToken();
+  state.zone = loadZone();
   const cached = loadCache();
   if(cached){
     state.data = cached.data;
     state.lastUpdated = cached.ts ? new Date(cached.ts) : null;
   }
-  if(!state.token){
+  if(state.token){
+    state.mode = "tibber";
+  }else if(state.zone){
+    state.mode = "zone";
+  }else{
     state.view = "connect";
     render();
     return;
@@ -520,20 +646,34 @@ function scheduleAutoRefresh(){
 }
 
 async function refreshPrices(isInitial){
-  if(!state.token) return;
+  if(state.mode === "tibber" && !state.token) return;
+  if(state.mode === "zone" && !state.zone) return;
+  if(!state.mode) return;
   state.refreshing = true;
   if(!isInitial) render();
   try{
-    const homes = await fetchPrices(state.token);
-    const home = pickHome(homes, state.settings.homeId);
-    const info = extractPriceInfo(home);
-    const payload = {
-      homes: homes.map(h => ({id:h.id, name:h.appNickname || (h.address && h.address.address1) || "Hem"})),
-      homeId: home.id,
-      current: info.current,
-      today: info.today,
-      tomorrow: info.tomorrow
-    };
+    let payload;
+    if(state.mode === "tibber"){
+      const homes = await fetchPrices(state.token);
+      const home = pickHome(homes, state.settings.homeId);
+      const info = extractPriceInfo(home);
+      payload = {
+        homes: homes.map(h => ({id:h.id, name:h.appNickname || (h.address && h.address.address1) || "Hem"})),
+        homeId: home.id,
+        current: info.current,
+        today: info.today,
+        tomorrow: info.tomorrow
+      };
+    }else{
+      const z = await fetchZonePrices(state.zone);
+      payload = {
+        homes: [{id: state.zone, name: zoneLabel(state.zone)}],
+        homeId: state.zone,
+        current: z.current,
+        today: z.today,
+        tomorrow: z.tomorrow
+      };
+    }
     state.data = payload;
     state.lastUpdated = new Date();
     state.error = null;
@@ -558,6 +698,7 @@ async function handleConnect(token){
     await validateToken(token);
     saveToken(token);
     state.token = token;
+    state.mode = "tibber";
     state.view = "home";
     state.loading = false;
     render();
@@ -570,17 +711,65 @@ async function handleConnect(token){
   }
 }
 
+async function handleConnectZone(zone){
+  state.connectError = null;
+  state.loading = true;
+  render();
+  try{
+    await fetchZoneDay(zone, new Date()); // bekräfta att elområdet ger giltig data
+    saveZone(zone);
+    state.zone = zone;
+    state.mode = "zone";
+    state.view = "home";
+    state.loading = false;
+    render();
+    await refreshPrices(true);
+    scheduleAutoRefresh();
+  }catch(err){
+    state.loading = false;
+    state.connectError = (err && err.message) || "Kunde inte hämta priser för det valda elområdet.";
+    render();
+  }
+}
+
+function useMyLocation(){
+  if(!navigator.geolocation){
+    state.connectError = "Din webbläsare stöder inte platsdelning. Välj elområde manuellt istället.";
+    render();
+    return;
+  }
+  state.geoLoading = true;
+  state.connectError = null;
+  render();
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const zone = zoneFromCoords(pos.coords.latitude);
+      state.geoLoading = false;
+      handleConnectZone(zone);
+    },
+    () => {
+      state.geoLoading = false;
+      state.connectError = "Kunde inte hämta din plats. Välj elområde manuellt istället.";
+      render();
+    },
+    {timeout: 10000}
+  );
+}
+
 function handleDisconnect(){
   clearToken();
+  clearZone();
   localStorage.removeItem(LS_CACHE);
   state.token = null;
+  state.zone = null;
+  state.mode = null;
   state.data = null;
   state.lastUpdated = null;
   state.error = null;
   if(state.refreshTimer) clearInterval(state.refreshTimer);
   state.view = "connect";
   render();
-  announce("Du har kopplat från ditt Tibber-konto.");
+  announce("Du har kopplat från.");
 }
 
 function openSettings(){
@@ -669,15 +858,29 @@ function wireTopbar(){
 
 /* ---------------------------- Connect screen ---------------------------- */
 function renderConnect(){
+  const tab = state.connectTab;
   return `
   <main>
     <div class="connect-wrap">
       <div class="bolt-big">⚡</div>
       <h1>Elpriskoll</h1>
       <p class="lead">Se direkt om elpriset är bra, mindre bra eller dyrt just nu – och få reda på när det blir billigare igen.</p>
+
+      <div class="toggle-group connect-form" style="margin-bottom:22px;">
+        <button data-tab="tibber" aria-pressed="${tab==='tibber'}">Tibber-konto</button>
+        <button data-tab="zone" aria-pressed="${tab==='zone'}">Utan inloggning</button>
+      </div>
+
+      ${tab === "tibber" ? renderConnectTibber() : renderConnectZone()}
+    </div>
+  </main>`;
+}
+
+function renderConnectTibber(){
+  return `
       <form class="connect-form" id="connect-form">
         <div class="field">
-          <label for="token-input">C842639A80A34A6FD03D12E345274B3ADEF3A51D9588404DD58C40DF6D5CBBE9-1</label>
+          <label for="token-input">Tibber API-token</label>
           <input type="password" id="token-input" name="token" autocomplete="off" spellcheck="false" placeholder="Klistra in din token här" required>
           <div class="hint">Hämta din personliga token på <strong>developer.tibber.com</strong>. Token skickas endast till Tibbers API och sparas lokalt i din webbläsare.</div>
           ${state.connectError ? `<div class="error-text" role="alert">${escapeHtml(state.connectError)}</div>` : ""}
@@ -689,18 +892,81 @@ function renderConnect(){
       <div class="trust-note">
         ${iconShield()}
         <span>Din token lagras endast lokalt i den här webbläsaren – inte i något GitHub-repo eller på någon server. Du kan koppla från när du vill, då tas den bort igen.</span>
-      </div>
-    </div>
-  </main>`;
+      </div>`;
 }
+
+function renderConnectZone(){
+  return `
+      <div class="connect-form">
+        <div class="field">
+          <label>Välj ditt elområde</label>
+          <div class="row-gap" style="flex-wrap:wrap;">
+            ${ELOMRADEN.map(z => `
+              <button type="button" class="btn" data-zone="${z.id}" style="flex:1 1 45%; text-align:left;" ${state.loading ? "disabled":""}>
+                <div style="font-weight:700;">${z.id}</div>
+                <div style="font-size:12px; color:var(--text-dim); font-weight:500;">${z.name}</div>
+              </button>`).join("")}
+          </div>
+        </div>
+
+        <form id="postnummer-form">
+          <div class="field">
+            <label for="postnummer-input">Eller ange ditt postnummer</label>
+            <div class="row-gap">
+              <input type="text" id="postnummer-input" inputmode="numeric" autocomplete="postal-code" maxlength="6" placeholder="T.ex. 123 45" style="flex:1;" ${state.loading ? "disabled":""}>
+              <button type="submit" class="btn" style="flex:0 0 auto;" ${state.loading ? "disabled":""}>Hitta elområde</button>
+            </div>
+            <div class="hint">Postnumret används bara i webbläsaren för att gissa elområde – det sparas eller skickas aldrig någonstans.</div>
+          </div>
+        </form>
+        ${state.connectError ? `<div class="error-text" role="alert">${escapeHtml(state.connectError)}</div>` : ""}
+
+        <button type="button" class="btn btn-block" id="btn-use-location" ${state.loading ? "disabled":""}>
+          ${state.geoLoading ? "Hämtar plats …" : "Eller använd min plats"}
+        </button>
+      </div>
+      <div class="trust-note">
+        ${iconInfo()}
+        <span><strong>Ingen inloggning krävs.</strong> Priset hämtas från det öppna API:et elprisetjustnu.se och visar Nord Pool-spotpriset (inkl. uppskattad moms) för hela elområdet – inte din exakta adress. Både postnummer- och platsgissningen är grova uppskattningar, särskilt nära en elområdesgräns. Priset kan också skilja sig från vad du faktiskt betalar, t.ex. om du har fastpris eller ett annat påslag än ren spotprisvidarefakturering.</span>
+      </div>`;
+}
+
 function wireConnect(){
-  const form = document.getElementById("connect-form");
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const token = document.getElementById("token-input").value.trim();
-    if(!token) return;
-    handleConnect(token);
+  document.querySelectorAll("[data-tab]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.connectTab = btn.getAttribute("data-tab");
+      state.connectError = null;
+      render();
+    });
   });
+  const form = document.getElementById("connect-form");
+  if(form){
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const token = document.getElementById("token-input").value.trim();
+      if(!token) return;
+      handleConnect(token);
+    });
+  }
+  document.querySelectorAll("[data-zone]").forEach(btn => {
+    btn.addEventListener("click", () => handleConnectZone(btn.getAttribute("data-zone")));
+  });
+  const geoBtn = document.getElementById("btn-use-location");
+  if(geoBtn) geoBtn.addEventListener("click", useMyLocation);
+  const pnrForm = document.getElementById("postnummer-form");
+  if(pnrForm){
+    pnrForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const val = document.getElementById("postnummer-input").value;
+      const zone = zoneFromPostnummer(val);
+      if(!zone){
+        state.connectError = "Kunde inte tolka postnumret. Ange minst tre siffror, t.ex. 123 45.";
+        render();
+        return;
+      }
+      handleConnectZone(zone);
+    });
+  }
 }
 
 /* ---------------------------- Home screen ---------------------------- */
@@ -779,6 +1045,7 @@ function renderHome(){
     <div class="card">
       ${renderChartAndList(state.activeDay === "tomorrow" && hasTomorrow ? data.tomorrow : data.today, settings, data.current)}
     </div>
+    ${state.mode === "zone" ? `<div class="hint" style="text-align:center; margin-top:14px;">Priser för ${escapeHtml(zoneLabel(state.zone))} från <a href="https://www.elprisetjustnu.se" target="_blank" rel="noopener">elprisetjustnu.se</a>, ej din exakta adress.</div>` : ""}
   </main>`;
 }
 
@@ -828,14 +1095,22 @@ function renderNextCheapCard(currentTone, next, hasTomorrow, settings){
   </div>`;
 }
 
+function periodResolutionLabel(periods){
+  if(!periods || periods.length < 2) return "";
+  const mins = Math.round((new Date(periods[1].startsAt) - new Date(periods[0].startsAt)) / 60000);
+  if(mins > 0 && mins <= 20) return "15 min-upplösning";
+  if(mins > 20 && mins <= 40) return "30 min-upplösning";
+  return "Timupplösning";
+}
+
 function renderChartAndList(periods, settings, current){
   if(!periods || !periods.length){
     return `<div style="text-align:center;color:var(--text-dim);padding:20px 0;">Ingen prisdata tillgänglig för den här dagen.</div>`;
   }
   const {min, max} = findExtremes(periods);
   const domainMax = Math.max(...periods.map(p => oreFromTotal(p.total)), settings.orangeMax * 1.15);
-  const chartH = 130, barW = 22, gap = 6, padTop = 10;
-  const w = periods.length * (barW + gap);
+  const chartH = 130, labelH = 26, barW = 22, gap = 6, padTop = 10;
+  const w = periods.length * (barW + gap) + 20;
 
   const bars = periods.map((p, i) => {
     const tone = classify(p.total, settings);
@@ -849,15 +1124,30 @@ function renderChartAndList(periods, settings, current){
     </g>`;
   }).join("");
 
+  // Klockslagsetiketter: en etikett per hela timme (t.ex. var 4:e stapel vid 15 min-
+  // upplösning), så grafen alltid visar rätt klockslag oavsett om Tibber/elområdet
+  // levererar tim- eller kvartsprisperioder.
+  const labels = periods.map((p, i) => {
+    const d = new Date(p.startsAt);
+    if(d.getMinutes() !== 0) return "";
+    const x = i * (barW + gap) + barW / 2;
+    const y = chartH + 15;
+    return `<text x="0" y="0" transform="translate(${x} ${y}) rotate(-50)" font-size="10" fill="var(--text-faint)" text-anchor="end" font-family="var(--font-body)">${fmtTime(p.startsAt)}</text>`;
+  }).join("");
+
   const greenY = chartH - (settings.greenMax / domainMax) * (chartH - padTop);
   const orangeY = chartH - (settings.orangeMax / domainMax) * (chartH - padTop);
 
   const svg = `
+  <div class="row-gap" style="justify-content:space-between; align-items:center; margin-bottom:8px;">
+    <span class="pill" style="font-weight:600;">${periodResolutionLabel(periods)}</span>
+  </div>
   <div class="chart-wrap">
-    <svg class="chart-svg" width="${w}" height="${chartH+4}" viewBox="0 0 ${w} ${chartH+4}" role="img" aria-label="Diagram över prisperioder">
+    <svg class="chart-svg" width="${w}" height="${chartH+labelH+4}" viewBox="0 0 ${w} ${chartH+labelH+4}" role="img" aria-label="Diagram över prisperioder med klockslag">
       <line x1="0" y1="${greenY}" x2="${w}" y2="${greenY}" stroke="var(--green)" stroke-dasharray="3 4" stroke-width="1.5" opacity=".7"></line>
       <line x1="0" y1="${orangeY}" x2="${w}" y2="${orangeY}" stroke="var(--orange)" stroke-dasharray="3 4" stroke-width="1.5" opacity=".7"></line>
       ${bars}
+      ${labels}
     </svg>
   </div>
   <div class="legend">
@@ -906,16 +1196,17 @@ function renderSettings(){
   return `<main>
     <div class="settings-group">
 
-      <div class="section-title" style="margin-top:4px;">Tibber-anslutning</div>
+      <div class="section-title" style="margin-top:4px;">Anslutning</div>
       <div class="card">
         <div class="token-status">
           <div>
-            <div class="lbl">Ansluten med token</div>
-            <div class="val">${maskToken(state.token)}</div>
+            <div class="lbl">${state.mode === "zone" ? "Elområde (utan inloggning)" : "Ansluten med Tibber-token"}</div>
+            <div class="val">${state.mode === "zone" ? zoneLabel(state.zone) : maskToken(state.token)}</div>
           </div>
           <button class="btn btn-danger" id="btn-disconnect">Koppla från</button>
         </div>
-        ${homes.length > 1 ? `
+        ${state.mode === "zone" ? `<div class="hint" style="margin-top:12px;">Baserat på elprisetjustnu.se för ditt valda elområde, inte din exakta adress eller ditt faktiska Tibber-pris.</div>` : ""}
+        ${state.mode === "tibber" && homes.length > 1 ? `
         <div class="field" style="margin-top:16px;">
           <label for="home-select">Hem</label>
           <select id="home-select">
@@ -998,14 +1289,17 @@ function renderSettings(){
         <button class="btn btn-primary" id="btn-save-settings" style="flex:1;">Spara</button>
       </div>
     </div>
-    <footer class="legal">Elpriskoll är en oberoende app och är inte kopplad till eller godkänd av Tibber. Priser hämtas direkt från Tibbers API med din egen token.</footer>
+    <footer class="legal">Elpriskoll är en oberoende app och är inte kopplad till eller godkänd av Tibber.${state.mode === "zone" ? " Elpriser tillhandahålls av <a href=\"https://www.elprisetjustnu.se\" target=\"_blank\" rel=\"noopener\">Elpriset just nu.se</a>." : " Priser hämtas direkt från Tibbers API med din egen token."}</footer>
   </main>`;
 }
 
 function wireSettings(){
   const d = state.settingsDraft;
   document.getElementById("btn-disconnect").addEventListener("click", () => {
-    if(confirm("Vill du koppla från ditt Tibber-konto? Din sparade token tas bort från den här webbläsaren.")){
+    const msg = state.mode === "zone"
+      ? "Vill du koppla från? Ditt sparade elområde tas bort från den här webbläsaren."
+      : "Vill du koppla från ditt Tibber-konto? Din sparade token tas bort från den här webbläsaren.";
+    if(confirm(msg)){
       handleDisconnect();
     }
   });
