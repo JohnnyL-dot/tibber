@@ -1,10 +1,18 @@
 <!DOCTYPE html>
 <!--
   Elpriskoll
-  Version: 1.6.0
+  Version: 1.7.0
   Senast ändrad: 2026-09-22
 
   Ändringslogg (senaste överst):
+  - 1.7.0 (2026-09-22): "Just nu" i Tibber-läget räknas åter fram lokalt från
+    today-listan (samma metod som elområdesläget), istället för Tibbers eget
+    "current"-fält – bekräftat att det fältet kan ligga kvar på hel timme för
+    konton med kvartsprisupplösning, medan today-listan och Tibber-appens
+    egen vy faktiskt är kvartsupplösta. Ska nu matcha Tibber-appen både i
+    tidsupplösning och pris.
+  - 1.6.1 (2026-09-22): Ångrade sluttiden i "Just nu"-rutan igen – båda lägen
+    visar nu enhetligt "Perioden HH:MM – nu", som innan.
   - 1.6.0 (2026-09-22): "Just nu"-rutan i Tibber-läget använder åter Tibbers
     EGET "current"-fält (inte ett lokalt uträknat värde) som förstahandsval,
     så priset garanterat matchar Tibber-appen exakt. Tidsupplösningen (tim
@@ -313,7 +321,7 @@ footer.legal{padding:10px 20px 40px; text-align:center; font-size:11.5px; color:
    Ingen token eller autentiseringsuppgift lagras i källkoden.
    ========================================================================= */
 
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.7.0";
 const APP_BUILD_DATE = "2026-09-22";
 
 const TIBBER_ENDPOINT = "https://api.tibber.com/v1-beta/gql";
@@ -659,14 +667,12 @@ function extractPriceInfo(home){
   const pi = home && home.currentSubscription && home.currentSubscription.priceInfo;
   const today = (pi && pi.today) || [];
   const tomorrow = (pi && pi.tomorrow) || [];
-  // Använder Tibbers EGET "current"-fält som förstahandsval – det är den siffra
-  // Tibber själva anser är aktuellt pris just nu, och garanterar därför att
-  // "just nu"-rutan här matchar Tibber-appen exakt. Tidsupplösningen (tim eller
-  // kvart) följer i så fall vad Tibber faktiskt levererar för just det här hemmet
-  // – appen kan inte visa finare upplösning än vad Tibber själva har tillgång
-  // till. Beräknas bara fram lokalt (computeCurrentPeriod) om Tibber undantagsvis
-  // inte skulle skicka med ett current-fält alls.
-  const current = (pi && pi.current) || computeCurrentPeriod(today, new Date());
+  // Räknas fram lokalt från today-listan (computeCurrentPeriod), INTE från
+  // Tibbers eget "current"-fält: det fältet visade sig ligga kvar på hel timme
+  // för konton med kvartsprisupplösning, medan today-listan (och Tibber-appens
+  // egen "just nu"-vy) faktiskt är kvartsupplöst. Faller bara tillbaka på
+  // current-fältet om today-listan mot förmodan skulle vara tom.
+  const current = computeCurrentPeriod(today, new Date()) || (pi && pi.current) || null;
   return { current, today, tomorrow };
 }
 function findNextCheap(today, tomorrow, settings, now){
@@ -1159,7 +1165,6 @@ function renderHome(){
   const hasTomorrow = data.tomorrow && data.tomorrow.length > 0;
 
   const heroPct = tonePosition(data.current.total, settings);
-  const currentPeriodEnd = findPeriodEnd(data.current, data.today, data.tomorrow);
 
   return `<main>
     ${banner}
@@ -1172,7 +1177,7 @@ function renderHome(){
         <span class="unit">${settings.unit === "kr" ? "kr/kWh" : "öre/kWh"}</span>
       </div>
       <div class="hero-msg">${escapeHtml(msg)}</div>
-      <div class="hero-sub">Perioden ${fmtTime(data.current.startsAt)}${currentPeriodEnd ? "–" + fmtTime(currentPeriodEnd) : " – nu"}</div>
+      <div class="hero-sub">Perioden ${fmtTime(data.current.startsAt)} – nu</div>
       <div class="hero-strip" aria-hidden="true">
         <div class="track">
           <div class="seg" style="left:0%; width:33.3%; background:rgba(0,0,0,.14);"></div>
@@ -1208,17 +1213,6 @@ function renderHome(){
   </main>`;
 }
 
-// Tibbers "current"-objekt har ingen egen sluttid, så vi hittar den genom att
-// leta upp nästa period i today/tomorrow-listan. Ger t.ex. "14:00–14:15" vid
-// kvartsupplösning eller "14:00–15:00" vid timupplösning, så det syns tydligt
-// vilken tidsupplösning Tibber faktiskt levererar för det här hemmet.
-function findPeriodEnd(current, today, tomorrow){
-  if(!current) return null;
-  const combined = (today || []).concat(tomorrow || []);
-  const idx = combined.findIndex(p => p.startsAt === current.startsAt);
-  if(idx === -1 || idx === combined.length - 1) return null;
-  return combined[idx + 1].startsAt;
-}
 function tonePosition(total, settings){
   const ore = oreFromTotal(total);
   const g = settings.greenMax, o = settings.orangeMax;
