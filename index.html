@@ -1,86 +1,7 @@
 <!DOCTYPE html>
-<!--
-  Elpriskoll
-  Version: 1.9.1
-  Senast ändrad: 2026-09-22
-
-  Ändringslogg (senaste överst):
-  - 1.9.1 (2026-09-22): Städade bort en dubbel sidnavigering i "Nollställ
-    allt" (satte både location.href och anropade reload() – kunde ge
-    oförutsägbart beteende i vissa webbläsare). Hela appflödet testkört i en
-    simulerad webbläsarmiljö (Tibber- och elområdesläge, hem + inställningar)
-    utan fel, för att felsöka en rapporterad blank sida.
-  - 1.9.0 (2026-09-22): Priset uppdateras nu alltid automatiskt en minut efter
-    varje ny prisperiod (xx:01, xx:16, xx:31, xx:46), utöver det vanliga
-    uppdateringsintervallet i inställningarna. Elområdesläget visar nu en
-    tydlig källhänvisning direkt under "just nu"-rutan på startsidan (inte
-    bara i inställningarna), med en påminnelse om att priset kan skilja sig
-    från den faktiska räkningen beroende på elbolag, avtal, nätavgift osv.
-  - 1.8.0 (2026-09-22): Hittade den faktiska orsaken till timupplösningen i
-    Tibber-läget: GraphQL-frågan saknade argumentet resolution: QUARTER_HOURLY
-    på priceInfo, så Tibbers API svarade bakåtkompatibelt med timpriser även
-    för hem som stöder kvartspriser. Nu begärs QUARTER_HOURLY uttryckligen.
-    Token-länken pekar åter på developer.tibber.com (startsidan) istället för
-    en ospårbar undersida, med tydligare manuella steg – ingen pålitlig
-    direktlänk till inloggningen hittades.
-  - 1.7.0 (2026-09-22): "Just nu" i Tibber-läget räknas åter fram lokalt från
-    today-listan (samma metod som elområdesläget), istället för Tibbers eget
-    "current"-fält – bekräftat att det fältet kan ligga kvar på hel timme för
-    konton med kvartsprisupplösning, medan today-listan och Tibber-appens
-    egen vy faktiskt är kvartsupplösta. Ska nu matcha Tibber-appen både i
-    tidsupplösning och pris.
-  - 1.6.1 (2026-09-22): Ångrade sluttiden i "Just nu"-rutan igen – båda lägen
-    visar nu enhetligt "Perioden HH:MM – nu", som innan.
-  - 1.6.0 (2026-09-22): "Just nu"-rutan i Tibber-läget använder åter Tibbers
-    EGET "current"-fält (inte ett lokalt uträknat värde) som förstahandsval,
-    så priset garanterat matchar Tibber-appen exakt. Tidsupplösningen (tim
-    eller kvart) följer i så fall vad Tibber faktiskt levererar för det
-    aktuella hemmet/grid-bolaget – appen kan inte visa finare upplösning än
-    vad Tibber själva har tillgång till där. Elområdesläget (utan inloggning)
-    är opåverkat och räknar fortfarande fram aktuell period lokalt, eftersom
-    elprisetjustnu.se inte har något motsvarande "current"-fält. "Just nu"-
-    rutan visar nu även periodens sluttid (t.ex. "14:00–14:15" eller
-    "14:00–15:00"), så tidsupplösningen syns tydligt istället för bara "– nu".
-  - 1.5.0 (2026-09-22): Sidan ber nu webbläsaren att aldrig cacha index.html
-    (no-cache-metataggar), så uppdateringar syns direkt utan manuell
-    cacherensning. Ny "Nollställ allt"-knapp i inställningarna som rensar all
-    sparad data och startar om appen helt. Inställningar sparas nu direkt när
-    du ändrar dem (ingen separat "Spara"-knapp längre att glömma). Välkomst-
-    ruta på startsidan som visar vägen till inställningarna första gången.
-    "Koppla från" syns nu även direkt på startsidan, inte bara i
-    inställningarna. "Just nu"-rutan räknas nu fram på samma sätt oavsett
-    Tibber- eller elområdesläge, så den följer samma tidsupplösning som
-    resten av prisöversikten i båda lägena.
-  - 1.4.0 (2026-09-22): Token-länken på Tibber-fliken går nu direkt till
-    Tibbers inloggning/access-token-sida (developer.tibber.com/settings/
-    accesstoken) istället för startsidan. Prisgrafen visar nu prissiffran
-    ovanför varje stapel, inte bara höjd/färg. "Idag" i prisöversikten visar
-    numera bara innevarande och kommande perioder (inte redan passerade
-    timmar sedan midnatt).
-  - 1.3.0 (2026-09-22): Prisnivåer i elområdesläget räknas nu upp med svensk
-    energiskatt (36,0 öre/kWh) OCH moms (25%), inte bara moms. Länk till
-    developer.tibber.com för att hämta Tibber-token. Klockslag i prisgrafen
-    (var 4:e stapel vid 15 min-upplösning) + upplösningsbadge. Postnummerfält
-    som alternativ till platsknappen i elområdesläget.
-  - 1.2.0: Nytt läge "Utan inloggning" (elområde SE1–SE4, manuellt/postnummer/
-    plats) via elprisetjustnu.se, som alternativ till Tibber-token.
-  - 1.1.0: Möjlighet att välja hem om Tibber-kontot har fler än ett.
-  - 1.0.0: Första version enligt kravspecifikationen.
-
-  Versionsnumret visas längst ner i appens inställningsvy, så att man kan
-  bekräfta i webbläsaren vilken build som faktiskt körs (t.ex. vid
-  cacheproblem efter en uppdatering – gör då en hård omladdning,
-  Ctrl/Cmd+Shift+R, eller rensa webbläsarcachen för sidan).
--->
 <html lang="sv">
 <head>
 <meta charset="UTF-8">
-<!-- Be webbläsaren att aldrig cacha själva HTML-sidan, så att uppdateringar av
-     appen (nya versioner av denna fil) alltid hämtas direkt vid en vanlig
-     omladdning, utan att användaren manuellt behöver rensa webbläsarcachen. -->
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Elpriskoll – din Tibber-elprisindikator</title>
 <meta name="description" content="Se om elpriset just nu är bra, mindre bra eller dyrt – och när det blir billigare.">
@@ -209,7 +130,6 @@ main{flex:1; padding:4px 20px 48px;}
 .field{margin-bottom:18px;}
 .field label{display:block; font-size:13.5px; font-weight:600; margin-bottom:7px; color:var(--text-dim);}
 .field .hint{font-size:12.5px; color:var(--text-faint); margin-top:6px; line-height:1.5;}
-.field .hint a{color:var(--text); font-weight:700; text-decoration:underline; text-decoration-color:var(--accent); text-decoration-thickness:2px; text-underline-offset:2px;}
 input[type=text], input[type=password], input[type=number], select{
   width:100%; padding:12px 14px; border-radius:12px; border:1px solid var(--border);
   background:var(--bg-2); color:var(--text); font-size:15px; font-family:inherit;
@@ -339,16 +259,12 @@ footer.legal{padding:10px 20px 40px; text-align:center; font-size:11.5px; color:
    Ingen token eller autentiseringsuppgift lagras i källkoden.
    ========================================================================= */
 
-const APP_VERSION = "1.9.1";
-const APP_BUILD_DATE = "2026-09-22";
-
 const TIBBER_ENDPOINT = "https://api.tibber.com/v1-beta/gql";
 const ZONE_API_BASE = "https://www.elprisetjustnu.se/api/v1/prices";
 const LS_TOKEN = "elpriskoll.token.v1";
 const LS_ZONE = "elpriskoll.zone.v1";
 const LS_SETTINGS = "elpriskoll.settings.v1";
 const LS_CACHE = "elpriskoll.cache.v1";
-const LS_ONBOARD_DISMISSED = "elpriskoll.onboard-dismissed.v1";
 
 const ELOMRADEN = [
   {id:"SE1", name:"Norra Sverige", hint:"t.ex. Luleå, Kiruna"},
@@ -388,12 +304,10 @@ const state = {
   error: null,                // {message} shown as banner, data may still be cached
   connectError: null,
   refreshTimer: null,
-  quarterRefreshTimer: null,
   activeDay: "today",         // today | tomorrow
   settingsDraft: null,
   settingsError: null,
-  refreshing: false,
-  onboardDismissed: false
+  refreshing: false
 };
 
 /* ---------------------------- Utilities ---------------------------- */
@@ -535,9 +449,6 @@ async function gql(token, query, variables, timeoutMs){
 
 const VALIDATE_QUERY = `query { viewer { login name } }`;
 
-// VIKTIGT: utan ett uttryckligt "resolution"-argument svarar Tibbers API med
-// timpriser (bakåtkompatibelt beteende) även för hem som stöder kvartspriser.
-// QUARTER_HOURLY måste begäras explicit för att få 15-minuterspriser.
 const PRICES_QUERY = `
 query {
   viewer {
@@ -546,7 +457,7 @@ query {
       appNickname
       address { address1 }
       currentSubscription {
-        priceInfo(resolution: QUARTER_HOURLY) {
+        priceInfo {
           current { total energy tax startsAt level }
           today { total energy tax startsAt level }
           tomorrow { total energy tax startsAt level }
@@ -576,12 +487,8 @@ async function fetchPrices(token){
    svenskt elområde. Ingen inloggning krävs. Priset är detsamma för alla i samma elområde
    och motsvarar därför INTE nödvändigtvis exakt vad en enskild Tibber-kund betalar (t.ex.
    om kontot har fastpris eller ett annat påslag än ren spotprisvidarefakturering).
-   API:t levererar rent spotpris exklusive skatt och moms. För att bli jämförbart med
-   Tibbers "total" (energi + skatt, inkl. moms) lägger vi på svensk energiskatt på el och
-   räknar sedan upp hela summan med 25% moms – precis som på en vanlig elräkning. */
-const ELSKATT_ORE = 36.0; // öre/kWh exkl. moms, 2026 års standardnivå (Skatteverket/Ekonomifakta).
-                            // Hushåll i vissa kommuner i norra Sverige har ca 9,6 öre lägre skatt –
-                            // det tas inte hänsyn till här, vilket gör uppskattningen något hög där.
+   API:t levererar pris exklusive moms – vi räknar upp med 25% för att bli jämförbart med
+   Tibbers "total" (energi + skatt). */
 function zoneFromCoords(lat){
   // Grov approximation baserad på breddgrad. Elområdenas riktiga gränser följer läns-
   // gränser (inte räta linjer), så detta är en uppskattning – inte en exakt uppslagning.
@@ -645,24 +552,11 @@ async function fetchZoneDay(zone, date){
   try{ arr = await res.json(); }
   catch(e){ throw {kind:"parse", message:"Kunde inte tolka svaret från elprisetjustnu.se."}; }
   return arr.map(p => ({
-    total: (p.SEK_per_kWh + ELSKATT_ORE / 100) * 1.25,
+    total: p.SEK_per_kWh * 1.25,
     startsAt: p.time_start,
     endsAt: p.time_end
   }));
 }
-// Räknar fram vilken period som pågår just nu utifrån en lista av prisperioder,
-// oavsett om de är i tim- eller kvartsupplösning. Används för BÅDA Tibber- och
-// elområdesläget, så att "just nu"-rutan alltid räknas fram på exakt samma sätt
-// och alltid matchar den upplösning som periods-listan faktiskt har – istället
-// för att i Tibber-läget lita på fältet Tibber själva kallar "current", som kan
-// skilja sig i tidsupplösning från today-listan.
-function computeCurrentPeriod(periods, now){
-  if(!periods || !periods.length) return null;
-  const nowMs = now.getTime();
-  const past = periods.filter(p => new Date(p.startsAt).getTime() <= nowMs);
-  return past.length ? past[past.length - 1] : periods[0];
-}
-
 async function fetchZonePrices(zone){
   const now = new Date();
   const today = await fetchZoneDay(zone, now);
@@ -674,7 +568,13 @@ async function fetchZonePrices(zone){
   }catch(e){
     tomorrow = []; // inte publicerat än – hanteras som "imorgondagens priser saknas"
   }
-  return {today, tomorrow, current: computeCurrentPeriod(today, now)};
+  const nowMs = now.getTime();
+  let current = today.find(p => nowMs >= new Date(p.startsAt).getTime() && nowMs < new Date(p.endsAt).getTime());
+  if(!current){
+    const past = today.filter(p => new Date(p.startsAt).getTime() <= nowMs);
+    current = past.length ? past[past.length - 1] : today[0];
+  }
+  return {today, tomorrow, current: current || null};
 }
 
 /* ---------------------------- Data helpers ---------------------------- */
@@ -687,15 +587,11 @@ function pickHome(homes, homeId){
 }
 function extractPriceInfo(home){
   const pi = home && home.currentSubscription && home.currentSubscription.priceInfo;
-  const today = (pi && pi.today) || [];
-  const tomorrow = (pi && pi.tomorrow) || [];
-  // Räknas fram lokalt från today-listan (computeCurrentPeriod), INTE från
-  // Tibbers eget "current"-fält: det fältet visade sig ligga kvar på hel timme
-  // för konton med kvartsprisupplösning, medan today-listan (och Tibber-appens
-  // egen "just nu"-vy) faktiskt är kvartsupplöst. Faller bara tillbaka på
-  // current-fältet om today-listan mot förmodan skulle vara tom.
-  const current = computeCurrentPeriod(today, new Date()) || (pi && pi.current) || null;
-  return { current, today, tomorrow };
+  return {
+    current: pi && pi.current ? pi.current : null,
+    today: (pi && pi.today) || [],
+    tomorrow: (pi && pi.tomorrow) || []
+  };
 }
 function findNextCheap(today, tomorrow, settings, now){
   const combined = today.concat(tomorrow);
@@ -704,13 +600,6 @@ function findNextCheap(today, tomorrow, settings, now){
     if(classify(p.total, settings) === "green") return p;
   }
   return null;
-}
-function periodsFromNow(periods, current){
-  // Visar dagens prisöversikt från och med den period som pågår just nu, istället
-  // för att alltid börja om vid midnatt – redan passerade perioder idag döljs.
-  if(!periods || !periods.length || !current) return periods;
-  const idx = periods.findIndex(p => p.startsAt === current.startsAt);
-  return idx === -1 ? periods : periods.slice(idx);
 }
 function findExtremes(list){
   if(!list.length) return {min:null, max:null};
@@ -730,7 +619,6 @@ async function boot(){
   applyTheme();
   state.token = loadToken();
   state.zone = loadZone();
-  try{ state.onboardDismissed = localStorage.getItem(LS_ONBOARD_DISMISSED) === "1"; }catch(e){}
   const cached = loadCache();
   if(cached){
     state.data = cached.data;
@@ -749,43 +637,12 @@ async function boot(){
   render();
   await refreshPrices(true);
   scheduleAutoRefresh();
-  scheduleQuarterlyRefresh();
 }
 
 function scheduleAutoRefresh(){
   if(state.refreshTimer) clearInterval(state.refreshTimer);
   const ms = Math.max(1, state.settings.refreshMinutes) * 60 * 1000;
   state.refreshTimer = setInterval(() => refreshPrices(false), ms);
-}
-
-// Nya priskvartar börjar kl. xx:00/xx:15/xx:30/xx:45. Utöver det vanliga
-// uppdateringsintervallet (inställningarna) garanterar den här schemaläggningen
-// alltid en extra uppdatering EN MINUT efter varje sådan gräns (xx:01/16/31/46)
-// – tillräckligt lång marginal för att det nya priset garanterat redan gäller
-// hos källan, men ändå snabbt nog för att "just nu"-rutan ska kännas i takt.
-function nextQuarterRefreshTime(now){
-  const marks = [1, 16, 31, 46];
-  const d = new Date(now);
-  d.setSeconds(0, 0);
-  const minute = now.getMinutes();
-  const target = marks.find(m => m > minute);
-  if(target === undefined){
-    d.setHours(d.getHours() + 1);
-    d.setMinutes(marks[0]);
-  }else{
-    d.setMinutes(target);
-  }
-  return d;
-}
-function scheduleQuarterlyRefresh(){
-  if(state.quarterRefreshTimer) clearTimeout(state.quarterRefreshTimer);
-  const now = new Date();
-  const next = nextQuarterRefreshTime(now);
-  const delay = Math.max(1000, next.getTime() - now.getTime());
-  state.quarterRefreshTimer = setTimeout(() => {
-    refreshPrices(false);
-    scheduleQuarterlyRefresh();
-  }, delay);
 }
 
 async function refreshPrices(isInitial){
@@ -847,7 +704,6 @@ async function handleConnect(token){
     render();
     await refreshPrices(true);
     scheduleAutoRefresh();
-    scheduleQuarterlyRefresh();
   }catch(err){
     state.loading = false;
     state.connectError = (err && err.message) || "Kunde inte ansluta till Tibber. Kontrollera din API-token.";
@@ -869,7 +725,6 @@ async function handleConnectZone(zone){
     render();
     await refreshPrices(true);
     scheduleAutoRefresh();
-    scheduleQuarterlyRefresh();
   }catch(err){
     state.loading = false;
     state.connectError = (err && err.message) || "Kunde inte hämta priser för det valda elområdet.";
@@ -912,7 +767,6 @@ function handleDisconnect(){
   state.lastUpdated = null;
   state.error = null;
   if(state.refreshTimer) clearInterval(state.refreshTimer);
-  if(state.quarterRefreshTimer) clearTimeout(state.quarterRefreshTimer);
   state.view = "connect";
   render();
   announce("Du har kopplat från.");
@@ -928,28 +782,25 @@ function closeSettings(){
   state.view = "home";
   render();
 }
-// Sparar utkastet direkt (autosave) så länge det är giltigt. Körs vid varje
-// ändring i inställningarna – ingen separat "Spara"-knapp krävs längre.
-// Returnerar true om det sparades, false om det just nu är ogiltigt (t.ex.
-// grön gräns >= orange gräns) – då visas ett felmeddelande men det senast
-// giltiga sparade värdet ligger kvar orört tills fältet rättas till.
-function commitSettingsDraft(){
+function saveSettingsDraft(){
   const d = state.settingsDraft;
   if(!(d.greenMax > 0) || !(d.orangeMax > 0)){
     state.settingsError = "Gränsvärdena måste vara positiva tal.";
-    return false;
+    render(); return;
   }
   if(d.greenMax >= d.orangeMax){
     state.settingsError = "Den gröna gränsen måste vara lägre än den orange gränsen.";
-    return false;
+    render(); return;
   }
   const homeChanged = d.homeId && state.data && d.homeId !== state.data.homeId;
   saveSettings({...d});
   applyTheme();
   scheduleAutoRefresh();
   state.settingsError = null;
+  state.view = "home";
+  render();
+  announce("Inställningarna har sparats.");
   if(homeChanged) refreshPrices(false);
-  return true;
 }
 function resetSettingsDraft(){
   state.settingsDraft = {
@@ -959,23 +810,7 @@ function resetSettingsDraft(){
     homeId: state.settingsDraft.homeId
   };
   state.settingsError = null;
-  commitSettingsDraft();
-}
-function resetEverything(){
-  const msg = "Vill du nollställa allt? Detta raderar din sparade token/elområde, alla inställningar och senast hämtade priser från den här webbläsaren, och startar om appen helt. Går inte att ångra.";
-  if(!confirm(msg)) return;
-  try{
-    localStorage.removeItem(LS_TOKEN);
-    localStorage.removeItem(LS_ZONE);
-    localStorage.removeItem(LS_SETTINGS);
-    localStorage.removeItem(LS_CACHE);
-    localStorage.removeItem(LS_ONBOARD_DISMISSED);
-  }catch(e){}
-  if(state.refreshTimer) clearInterval(state.refreshTimer);
-  // Ladda om sidan från grunden så eventuellt kvarvarande minnestillstånd i
-  // fliken också nollställs helt. (En enda reload – att både sätta location.href
-  // och anropa reload() kunde ge en dubbelnavigering i vissa webbläsare.)
-  location.reload();
+  render();
 }
 
 /* ============================================================
@@ -1006,15 +841,9 @@ function renderLoadingShell(){
 }
 
 function renderTopbar(title, isSettings){
-  const connectionNote = !isSettings && state.mode
-    ? `<div style="font-size:12px; color:var(--text-dim); margin-top:1px;">${state.mode === "zone" ? "Elområde " + escapeHtml(zoneLabel(state.zone)) : "Tibber-konto"} · <button id="btn-disconnect-home" style="background:none;border:none;padding:0;color:inherit;text-decoration:underline;font-size:12px;cursor:pointer;">koppla från</button></div>`
-    : "";
   return `
-  <div class="topbar" style="align-items:flex-start;">
-    <div>
-      <div class="brand"><span class="bolt">⚡</span> ${escapeHtml(title)}</div>
-      ${connectionNote}
-    </div>
+  <div class="topbar">
+    <div class="brand"><span class="bolt">⚡</span> ${escapeHtml(title)}</div>
     ${isSettings
       ? `<button class="icon-btn" id="btn-close-settings" aria-label="Stäng inställningar">${iconClose()}</button>`
       : `<button class="icon-btn" id="btn-open-settings" aria-label="Öppna inställningar">${iconGear()}</button>`}
@@ -1025,13 +854,6 @@ function wireTopbar(){
   if(s) s.addEventListener("click", openSettings);
   const c = document.getElementById("btn-close-settings");
   if(c) c.addEventListener("click", closeSettings);
-  const dc = document.getElementById("btn-disconnect-home");
-  if(dc) dc.addEventListener("click", () => {
-    const msg = state.mode === "zone"
-      ? "Vill du koppla från? Ditt sparade elområde tas bort från den här webbläsaren."
-      : "Vill du koppla från ditt Tibber-konto? Din sparade token tas bort från den här webbläsaren.";
-    if(confirm(msg)) handleDisconnect();
-  });
 }
 
 /* ---------------------------- Connect screen ---------------------------- */
@@ -1050,8 +872,6 @@ function renderConnect(){
       </div>
 
       ${tab === "tibber" ? renderConnectTibber() : renderConnectZone()}
-
-      <div style="margin-top:26px; font-size:11.5px; color:var(--text-faint);">Version ${APP_VERSION} (${APP_BUILD_DATE})</div>
     </div>
   </main>`;
 }
@@ -1062,11 +882,7 @@ function renderConnectTibber(){
         <div class="field">
           <label for="token-input">Tibber API-token</label>
           <input type="password" id="token-input" name="token" autocomplete="off" spellcheck="false" placeholder="Klistra in din token här" required>
-          <div class="hint">
-            Har du ingen token än?
-            <a href="https://developer.tibber.com/" target="_blank" rel="noopener">Öppna Tibbers utvecklarportal ↗</a>
-            och logga in med ditt Tibber-konto. Klicka sedan på ditt namn/profil uppe till höger och leta upp <strong>Access Tokens</strong> (ibland under "Developer settings") för att skapa och kopiera din token. Token skickas endast till Tibbers API och sparas lokalt i din webbläsare.
-          </div>
+          <div class="hint">Hämta din personliga token på <strong>developer.tibber.com</strong>. Token skickas endast till Tibbers API och sparas lokalt i din webbläsare.</div>
           ${state.connectError ? `<div class="error-text" role="alert">${escapeHtml(state.connectError)}</div>` : ""}
         </div>
         <button type="submit" class="btn btn-primary btn-block" id="connect-submit" ${state.loading ? "disabled" : ""}>
@@ -1111,7 +927,7 @@ function renderConnectZone(){
       </div>
       <div class="trust-note">
         ${iconInfo()}
-        <span><strong>Ingen inloggning krävs.</strong> Priset hämtas från det öppna API:et elprisetjustnu.se och visar Nord Pool-spotpriset för hela elområdet, uppräknat med svensk energiskatt (${ELSKATT_ORE.toFixed(1).replace(".", ",")} öre/kWh) och 25% moms – inte din exakta adress. Både postnummer- och platsgissningen är grova uppskattningar, särskilt nära en elområdesgräns, och skattenivån är densamma i hela landet trots att vissa kommuner i norr har lägre energiskatt. Priset kan också skilja sig från vad du faktiskt betalar, t.ex. om du har fastpris, nätavgift eller ett annat påslag än ren spotprisvidarefakturering.</span>
+        <span><strong>Ingen inloggning krävs.</strong> Priset hämtas från det öppna API:et elprisetjustnu.se och visar Nord Pool-spotpriset (inkl. uppskattad moms) för hela elområdet – inte din exakta adress. Både postnummer- och platsgissningen är grova uppskattningar, särskilt nära en elområdesgräns. Priset kan också skilja sig från vad du faktiskt betalar, t.ex. om du har fastpris eller ett annat påslag än ren spotprisvidarefakturering.</span>
       </div>`;
 }
 
@@ -1154,48 +970,13 @@ function wireConnect(){
 }
 
 /* ---------------------------- Home screen ---------------------------- */
-function shouldShowOnboarding(){
-  if(state.onboardDismissed) return false;
-  const s = state.settings;
-  return s.greenMax === DEFAULT_SETTINGS.greenMax &&
-         s.orangeMax === DEFAULT_SETTINGS.orangeMax &&
-         s.msgGreen === DEFAULT_SETTINGS.msgGreen &&
-         s.msgOrange === DEFAULT_SETTINGS.msgOrange &&
-         s.msgRed === DEFAULT_SETTINGS.msgRed;
-}
-function renderOnboardingBanner(){
-  if(!shouldShowOnboarding()) return "";
-  return `
-  <div class="banner" role="status" style="align-items:center;">
-    <div class="txt">
-      <strong>👋 Nytt här?</strong>
-      Du använder just nu standardgränserna för bra / mindre bra / dyrt pris. Öppna inställningarna (kugghjulet uppe till höger) för att anpassa gränsvärden, meddelandetexter, enhet och mer efter dina egna behov.
-    </div>
-    <div style="display:flex; flex-direction:column; gap:8px; flex-shrink:0;">
-      <button class="btn btn-primary" id="btn-onboard-settings">Öppna inställningar</button>
-      <button class="btn" id="btn-onboard-dismiss">Inte nu</button>
-    </div>
-  </div>`;
-}
-function dismissOnboarding(){
-  state.onboardDismissed = true;
-  try{ localStorage.setItem(LS_ONBOARD_DISMISSED, "1"); }catch(e){}
-  render();
-}
-function wireOnboarding(){
-  const s = document.getElementById("btn-onboard-settings");
-  if(s) s.addEventListener("click", openSettings);
-  const dsm = document.getElementById("btn-onboard-dismiss");
-  if(dsm) dsm.addEventListener("click", dismissOnboarding);
-}
-
 function renderHome(){
   const settings = state.settings;
   const data = state.data;
 
-  let banner = renderOnboardingBanner();
+  let banner = "";
   if(state.error){
-    banner += `
+    banner = `
     <div class="banner ${state.error.kind === 'auth' ? 'error' : ''}" role="alert">
       <div class="txt">
         <strong>${state.error.kind === "auth" ? "Anslutningen till Tibber verkar bruten" : "Kunde inte hämta senaste priset"}</strong>
@@ -1245,15 +1026,6 @@ function renderHome(){
       </div>
     </section>
 
-    ${state.mode === "zone" ? `
-    <div class="card next-card" style="margin-top:14px;" role="note">
-      <div class="glyph" style="color:var(--text-faint);">${iconInfo()}</div>
-      <div class="body">
-        <div class="title">Källa: elprisetjustnu.se</div>
-        <div class="desc">Nord Pool-spotpris för elområde ${escapeHtml(zoneLabel(state.zone))}, uppräknat med uppskattad energiskatt och moms – inte din exakta adress. Ditt faktiska pris kan skilja sig beroende på elbolag, avtalstyp (t.ex. fastpris), nätavgift och eventuellt påslag.</div>
-      </div>
-    </div>` : ""}
-
     <div class="meta-row">
       <span class="updated">${state.lastUpdated ? "Uppdaterat " + fmtClock(state.lastUpdated) : "Inte uppdaterat än"}</span>
       <button class="refresh-btn ${state.refreshing ? "spin" : ""}" id="btn-refresh" ${state.refreshing ? "disabled" : ""}>
@@ -1263,18 +1035,17 @@ function renderHome(){
 
     ${renderNextCheapCard(tone, next, hasTomorrow, settings)}
 
-    <div class="section-title" style="margin-bottom:2px;">
+    <div class="section-title">
       <span>Prisöversikt</span>
       <div class="toggle-group" style="width:auto;">
         <button data-day="today" aria-pressed="${state.activeDay==='today'}">Idag</button>
         ${hasTomorrow ? `<button data-day="tomorrow" aria-pressed="${state.activeDay==='tomorrow'}">Imorgon</button>` : ""}
       </div>
     </div>
-    ${state.activeDay === "today" ? `<div class="hint" style="margin:0 2px 12px;">Från nuvarande timme och framåt idag.</div>` : ""}
     <div class="card">
-      ${renderChartAndList(state.activeDay === "tomorrow" && hasTomorrow ? data.tomorrow : periodsFromNow(data.today, data.current), settings, data.current)}
+      ${renderChartAndList(state.activeDay === "tomorrow" && hasTomorrow ? data.tomorrow : data.today, settings, data.current)}
     </div>
-    ${state.mode === "zone" ? `<div class="hint" style="text-align:center; margin-top:14px;">Källa: <a href="https://www.elprisetjustnu.se" target="_blank" rel="noopener">elprisetjustnu.se</a>, elområde ${escapeHtml(zoneLabel(state.zone))}.</div>` : ""}
+    ${state.mode === "zone" ? `<div class="hint" style="text-align:center; margin-top:14px;">Priser för ${escapeHtml(zoneLabel(state.zone))} från <a href="https://www.elprisetjustnu.se" target="_blank" rel="noopener">elprisetjustnu.se</a>, ej din exakta adress.</div>` : ""}
   </main>`;
 }
 
@@ -1338,12 +1109,8 @@ function renderChartAndList(periods, settings, current){
   }
   const {min, max} = findExtremes(periods);
   const domainMax = Math.max(...periods.map(p => oreFromTotal(p.total)), settings.orangeMax * 1.15);
-  // chartH = ren stapelyta (0 = topp, chartH = baslinje). valueTop = extra utrymme
-  // ovanför staplarna där prissiffran skrivs ut, så den inte klipps även för de
-  // högsta staplarna. Allt ritas i en grupp som förskjuts neråt med valueTop.
-  const chartH = 130, labelH = 26, valueTop = 16, barW = 22, gap = 6, padTop = 6;
+  const chartH = 130, labelH = 26, barW = 22, gap = 6, padTop = 10;
   const w = periods.length * (barW + gap) + 20;
-  const totalH = valueTop + chartH + labelH + 4;
 
   const bars = periods.map((p, i) => {
     const tone = classify(p.total, settings);
@@ -1354,7 +1121,6 @@ function renderChartAndList(periods, settings, current){
     const isCurrent = current && p.startsAt === current.startsAt;
     return `<g class="bar ${isCurrent ? "current" : ""}">
       <rect class="fill" x="${x}" y="${y}" width="${barW}" height="${h}" rx="5" fill="var(--${tone})"></rect>
-      <text x="${x + barW/2}" y="${y - 5}" font-size="9.5" font-weight="700" fill="var(--text-dim)" text-anchor="middle" font-family="var(--font-body)">${formatPriceCompact(p.total, settings.unit)}</text>
     </g>`;
   }).join("");
 
@@ -1375,16 +1141,13 @@ function renderChartAndList(periods, settings, current){
   const svg = `
   <div class="row-gap" style="justify-content:space-between; align-items:center; margin-bottom:8px;">
     <span class="pill" style="font-weight:600;">${periodResolutionLabel(periods)}</span>
-    <span style="font-size:12px; color:var(--text-faint); font-weight:600;">${settings.unit === "kr" ? "kr/kWh" : "öre/kWh"}</span>
   </div>
   <div class="chart-wrap">
-    <svg class="chart-svg" width="${w}" height="${totalH}" viewBox="0 0 ${w} ${totalH}" role="img" aria-label="Diagram över prisperioder med klockslag och pris">
-      <g transform="translate(0, ${valueTop})">
-        <line x1="0" y1="${greenY}" x2="${w}" y2="${greenY}" stroke="var(--green)" stroke-dasharray="3 4" stroke-width="1.5" opacity=".7"></line>
-        <line x1="0" y1="${orangeY}" x2="${w}" y2="${orangeY}" stroke="var(--orange)" stroke-dasharray="3 4" stroke-width="1.5" opacity=".7"></line>
-        ${bars}
-        ${labels}
-      </g>
+    <svg class="chart-svg" width="${w}" height="${chartH+labelH+4}" viewBox="0 0 ${w} ${chartH+labelH+4}" role="img" aria-label="Diagram över prisperioder med klockslag">
+      <line x1="0" y1="${greenY}" x2="${w}" y2="${greenY}" stroke="var(--green)" stroke-dasharray="3 4" stroke-width="1.5" opacity=".7"></line>
+      <line x1="0" y1="${orangeY}" x2="${w}" y2="${orangeY}" stroke="var(--orange)" stroke-dasharray="3 4" stroke-width="1.5" opacity=".7"></line>
+      ${bars}
+      ${labels}
     </svg>
   </div>
   <div class="legend">
@@ -1414,7 +1177,6 @@ function renderChartAndList(periods, settings, current){
 }
 
 function wireHome(){
-  wireOnboarding();
   const retry = document.getElementById("btn-retry");
   if(retry) retry.addEventListener("click", () => refreshPrices(false));
   const refresh = document.getElementById("btn-refresh");
@@ -1443,7 +1205,7 @@ function renderSettings(){
           </div>
           <button class="btn btn-danger" id="btn-disconnect">Koppla från</button>
         </div>
-        ${state.mode === "zone" ? `<div class="hint" style="margin-top:12px;">Baserat på elprisetjustnu.se för ditt valda elområde, inkl. uppskattad energiskatt och moms. Inte din exakta adress eller ditt faktiska elpris.</div>` : ""}
+        ${state.mode === "zone" ? `<div class="hint" style="margin-top:12px;">Baserat på elprisetjustnu.se för ditt valda elområde, inte din exakta adress eller ditt faktiska Tibber-pris.</div>` : ""}
         ${state.mode === "tibber" && homes.length > 1 ? `
         <div class="field" style="margin-top:16px;">
           <label for="home-select">Hem</label>
@@ -1507,7 +1269,6 @@ function renderSettings(){
           <select id="refreshMinutes">
             ${[1,5,10,15,30,60].map(m => `<option value="${m}" ${m===d.refreshMinutes?"selected":""}>${m} minut${m===1?"":"er"}</option>`).join("")}
           </select>
-          <div class="hint">Utöver detta uppdateras priset alltid automatiskt en minut efter varje ny prisperiod (xx:01, xx:16, xx:31, xx:46), så "just nu" hänger med även med ett längre intervall här.</div>
         </div>
       </div>
 
@@ -1523,19 +1284,12 @@ function renderSettings(){
         </div>
       </div>
 
-      <div class="hint" style="margin:14px 2px 0;">Ändringar ovan sparas direkt.</div>
-      <div class="row-gap" style="margin-top:10px;">
+      <div class="row-gap" style="margin-top:22px;">
         <button class="btn" id="btn-reset-defaults" style="flex:1;">Återställ standard</button>
-        <button class="btn btn-primary" id="btn-done" style="flex:1;">Klar</button>
-      </div>
-
-      <div class="section-title">Farlig zon</div>
-      <div class="card">
-        <button class="btn btn-danger btn-block" id="btn-reset-everything">Nollställ allt</button>
-        <div class="hint" style="margin-top:10px;">Raderar token/elområde, alla inställningar och sparade priser från den här webbläsaren, och startar om appen helt. Använd om något känns fastlåst eller du vill börja om från noll.</div>
+        <button class="btn btn-primary" id="btn-save-settings" style="flex:1;">Spara</button>
       </div>
     </div>
-    <footer class="legal">Elpriskoll är en oberoende app och är inte kopplad till eller godkänd av Tibber.${state.mode === "zone" ? " Elpriser tillhandahålls av <a href=\"https://www.elprisetjustnu.se\" target=\"_blank\" rel=\"noopener\">Elpriset just nu.se</a>." : " Priser hämtas direkt från Tibbers API med din egen token."}<br>Version ${APP_VERSION} (${APP_BUILD_DATE})</footer>
+    <footer class="legal">Elpriskoll är en oberoende app och är inte kopplad till eller godkänd av Tibber.${state.mode === "zone" ? " Elpriser tillhandahålls av <a href=\"https://www.elprisetjustnu.se\" target=\"_blank\" rel=\"noopener\">Elpriset just nu.se</a>." : " Priser hämtas direkt från Tibbers API med din egen token."}</footer>
   </main>`;
 }
 
@@ -1553,33 +1307,24 @@ function wireSettings(){
   if(homeSel) homeSel.addEventListener("change", (e) => { d.homeId = e.target.value; });
 
   document.querySelectorAll("[data-unit]").forEach(btn => {
-    btn.addEventListener("click", () => { d.unit = btn.getAttribute("data-unit"); commitSettingsDraft(); render_settings_inplace(); });
+    btn.addEventListener("click", () => { d.unit = btn.getAttribute("data-unit"); render_settings_inplace(); });
   });
   document.querySelectorAll("[data-theme]").forEach(btn => {
-    btn.addEventListener("click", () => { d.theme = btn.getAttribute("data-theme"); commitSettingsDraft(); render_settings_inplace(); });
+    btn.addEventListener("click", () => { d.theme = btn.getAttribute("data-theme"); render_settings_inplace(); });
   });
   ["greenMax","orangeMax"].forEach(id => {
-    // "change" (inte "input") så fältet inte tappar fokus mitt i skrivandet –
-    // sparas ändå automatiskt så fort man lämnar fältet eller trycker Enter.
-    document.getElementById(id).addEventListener("change", (e) => {
+    document.getElementById(id).addEventListener("input", (e) => {
       d[id] = parseInt(e.target.value, 10) || 0;
-      commitSettingsDraft();
-      render_settings_inplace();
     });
   });
   ["msgGreen","msgOrange","msgRed"].forEach(id => {
-    document.getElementById(id).addEventListener("input", (e) => {
-      d[id] = e.target.value;
-      commitSettingsDraft();
-    });
+    document.getElementById(id).addEventListener("input", (e) => { d[id] = e.target.value; });
   });
   document.getElementById("refreshMinutes").addEventListener("change", (e) => {
     d.refreshMinutes = parseInt(e.target.value, 10);
-    commitSettingsDraft();
   });
-  document.getElementById("btn-reset-defaults").addEventListener("click", () => { resetSettingsDraft(); render_settings_inplace(); });
-  document.getElementById("btn-done").addEventListener("click", () => { commitSettingsDraft(); closeSettings(); });
-  document.getElementById("btn-reset-everything").addEventListener("click", resetEverything);
+  document.getElementById("btn-reset-defaults").addEventListener("click", resetSettingsDraft);
+  document.getElementById("btn-save-settings").addEventListener("click", saveSettingsDraft);
 
   function render_settings_inplace(){
     // Re-render settings view only, preserving draft object reference.
