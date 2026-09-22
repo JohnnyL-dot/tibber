@@ -8,7 +8,7 @@
   - 1.4.0 (2026-09-22): Token-länken på Tibber-fliken går nu direkt till
     Tibbers inloggning/access-token-sida (developer.tibber.com/settings/
     accesstoken) istället för startsidan. Prisgrafen visar nu prissiffran
-    ovanför varje stapel, inte bara höjd/färg. "Idag" i prisöversikten visar
+    ovanför varje stapel, inte bara höjd/färg. "Idag" i prisöversikten visarännu
     numera bara innevarande och kommande perioder (inte redan passerade
     timmar sedan midnatt).
   - 1.3.0 (2026-09-22): Prisnivåer i elområdesläget räknas nu upp med svensk
@@ -928,7 +928,7 @@ function renderConnectTibber(){
           <input type="password" id="token-input" name="token" autocomplete="off" spellcheck="false" placeholder="Klistra in din token här" required>
           <div class="hint">
             Har du ingen token än? Klicka nedan för att logga in på ditt Tibber-konto och hämta den direkt:
-            <a href="https://developer.tibber.com/settings/accesstoken" target="_blank" rel="noopener">Logga in & hämta min Tibber-token ↗</a>.
+            <a href="https://thewall.tibber.com/Account/Login?ReturnUrl=%2Fconnect%2Fauthorize%2Fcallback%3Fstate%3D63c60959-7441-4d8e-a5d0-a515097e0e13%26accountType%3Ddeveloper%26response_type%3Dcode%26redirect_uri%3Dhttps%253A%252F%252Fdeveloper.tibber.com%252Fauth%252Fcallback%26scope%3Dtibber_graph%2520price%2520consumption%26client_id%3Dtibber_developer" target="_blank" rel="noopener">Logga in & hämta min Tibber-token ↗</a>.
             Token skickas endast till Tibbers API och sparas lokalt i din webbläsare.
           </div>
           ${state.connectError ? `<div class="error-text" role="alert">${escapeHtml(state.connectError)}</div>` : ""}
