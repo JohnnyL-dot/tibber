@@ -122,14 +122,17 @@ enklare ur säkerhetssynpunkt än Tibber-läget (inga hemligheter att hantera).
 Om appen visas publikt anger den källan "Elpriser tillhandahålls av Elpriset
 just nu.se", i linje med deras användarvillkor.
 
-**Priser inkl. skatter och moms:** elprisetjustnu.se levererar rent spotpris
-(exkl. skatt och moms). Appen räknar därför upp priset med svensk energiskatt
-på el (36,0 öre/kWh, 2026 års standardnivå) och därefter 25% moms, för att
-likna en vanlig elräkning och vara jämförbart med Tibbers `total`-fält.
-Observera att hushåll i vissa kommuner i norra Sverige har en lägre
-energiskatt (ca 9,6 öre/kWh lägre) – det tas inte hänsyn till, så priset kan
-bli något för högt där. Nätavgift och elhandlarens eventuella påslag ingår
-aldrig, eftersom det inte finns någon öppen, nationell källa för det.
+**Priser inkl. moms, i linje med Tibbers eget pris:** elprisetjustnu.se
+levererar rent spotpris exklusive moms. Appen räknar upp det med 25% moms,
+vilket motsvarar exakt vad Tibbers `total`-fält representerar (energi +
+moms) – det vill säga priset från **elhandelsbolaget**. Varken elområdesläget
+eller Tibber-läget inkluderar nätavgift eller energiskatt, eftersom de
+alltid tas ut separat av **nätbolaget**, oavsett vilket elhandelsbolag man
+har – på så sätt blir de båda lägena jämförbara med varandra och med vad
+Tibbers egen app visar. Det här förklaras tydligt både i "just nu"-rutan
+("inkl. moms") och i inställningar/källhänvisning i elområdesläget. Ditt
+faktiska totalpris på elräkningen blir alltså högre än det som visas här,
+eftersom nätavgift och energiskatt tillkommer separat.
 
 Utöver elområdesknappar och platsknapp går det även att ange sitt
 **postnummer**, som slås upp mot en enkel, inbyggd tabell (byggd på PostNords
@@ -150,6 +153,13 @@ Utöver det räknas aktuell period fram lokalt från `today`-prislistan i BÅDA
 lägena (samma metod som elområdesläget alltid använt), istället för att i
 Tibber-läget lita på Tibbers eget `current`-fält, som visade sig kunna ligga
 kvar på hel timme oavsett upplösning på `today`-listan.
+
+## "Vänta till"-kortet och dagens tabell
+
+Kortet som föreslår nästa billiga period visar nu "imorgon" i texten om den
+föreslagna perioden inte infaller idag (t.ex. "Vänta till imorgon 00:15").
+Utan det kunde ett pris som egentligen gällde imorgon se ut att motsäga
+dagens tabell nedanför, som bara visar idagens kvarvarande perioder.
 
 ## Automatisk uppdatering i takt med prisperioderna
 

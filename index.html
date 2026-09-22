@@ -1,10 +1,25 @@
 <!DOCTYPE html>
 <!--
   Elpriskoll
-  Version: 1.9.2
+  Version: 2.0.0
   Senast ändrad: 2026-09-22
 
   Ändringslogg (senaste överst):
+  - 2.0.0 (2026-09-22): Två rättelser: (1) Elområdesläget räknade tidigare
+    upp priset med BÅDE energiskatt och moms, vilket inte matchar vad Tibbers
+    "total" faktiskt representerar (spotpris + moms – energiskatt och
+    nätavgift tas alltid ut separat av nätbolaget, oavsett elhandelsbolag).
+    Elområdesläget räknar nu bara upp med 25% moms, för att vara jämförbart
+    med Tibber-läget. Båda lägena anger nu tydligt "inkl. moms" direkt i
+    "just nu"-rutan samt i inställningar/källhänvisning, med en gemensam
+    förklaring om att nätavgift/energiskatt inte ingår i någotdera. (2)
+    "Vänta till"-kortet kunde visa en period som egentligen gällde imorgon,
+    utan att säga det – vilket gjorde att priset inte stämde med dagens
+    tabell (som bara visar idag). Kortet skriver nu ut "imorgon" när så är
+    fallet. Upptäckte och fixade även ett allvarligt fel i min egen
+    testmetod (mockat fetch för sent, så tidigare "godkända" tester bara
+    testat felhanteringsvägen) – körde om alla scenarier med korrekt
+    mockning och verifierade båda fixarna konkret.
   - 1.9.2 (2026-09-22): Versionsnumret visas nu även på själva översikten
     (inte bara anslutningsskärmen och inställningarna), som stöd för
     felsökning. Lade till en .nojekyll-fil i repot – utan den kör GitHub
@@ -346,7 +361,7 @@ footer.legal{padding:10px 20px 40px; text-align:center; font-size:11.5px; color:
    Ingen token eller autentiseringsuppgift lagras i källkoden.
    ========================================================================= */
 
-const APP_VERSION = "1.9.2";
+const APP_VERSION = "2.0.0";
 const APP_BUILD_DATE = "2026-09-22";
 
 const TIBBER_ENDPOINT = "https://api.tibber.com/v1-beta/gql";
@@ -584,11 +599,13 @@ async function fetchPrices(token){
    och motsvarar därför INTE nödvändigtvis exakt vad en enskild Tibber-kund betalar (t.ex.
    om kontot har fastpris eller ett annat påslag än ren spotprisvidarefakturering).
    API:t levererar rent spotpris exklusive skatt och moms. För att bli jämförbart med
-   Tibbers "total" (energi + skatt, inkl. moms) lägger vi på svensk energiskatt på el och
-   räknar sedan upp hela summan med 25% moms – precis som på en vanlig elräkning. */
-const ELSKATT_ORE = 36.0; // öre/kWh exkl. moms, 2026 års standardnivå (Skatteverket/Ekonomifakta).
-                            // Hushåll i vissa kommuner i norra Sverige har ca 9,6 öre lägre skatt –
-                            // det tas inte hänsyn till här, vilket gör uppskattningen något hög där.
+   Tibbers "total" (energi + skatt) representerar priset från ELHANDELSBOLAGET
+   (spotpris + moms) – inte hela elräkningen. Energiskatt och nätavgift står
+   nätbolaget för och tas ut separat, oavsett vilket elhandelsbolag man har,
+   så de ingår varken i Tibbers "total" eller i priset här. Vi räknar därför
+   bara upp elprisetjustnu.se:s spotpris med 25% moms, för att bli så
+   jämförbart som möjligt med Tibbers "total" och undvika att dubbelräkna
+   avgifter som redan tillkommer separat på den riktiga elräkningen. */
 function zoneFromCoords(lat){
   // Grov approximation baserad på breddgrad. Elområdenas riktiga gränser följer läns-
   // gränser (inte räta linjer), så detta är en uppskattning – inte en exakt uppslagning.
@@ -652,7 +669,7 @@ async function fetchZoneDay(zone, date){
   try{ arr = await res.json(); }
   catch(e){ throw {kind:"parse", message:"Kunde inte tolka svaret från elprisetjustnu.se."}; }
   return arr.map(p => ({
-    total: (p.SEK_per_kWh + ELSKATT_ORE / 100) * 1.25,
+    total: p.SEK_per_kWh * 1.25,
     startsAt: p.time_start,
     endsAt: p.time_end
   }));
@@ -1118,7 +1135,7 @@ function renderConnectZone(){
       </div>
       <div class="trust-note">
         ${iconInfo()}
-        <span><strong>Ingen inloggning krävs.</strong> Priset hämtas från det öppna API:et elprisetjustnu.se och visar Nord Pool-spotpriset för hela elområdet, uppräknat med svensk energiskatt (${ELSKATT_ORE.toFixed(1).replace(".", ",")} öre/kWh) och 25% moms – inte din exakta adress. Både postnummer- och platsgissningen är grova uppskattningar, särskilt nära en elområdesgräns, och skattenivån är densamma i hela landet trots att vissa kommuner i norr har lägre energiskatt. Priset kan också skilja sig från vad du faktiskt betalar, t.ex. om du har fastpris, nätavgift eller ett annat påslag än ren spotprisvidarefakturering.</span>
+        <span><strong>Ingen inloggning krävs.</strong> Priset hämtas från det öppna API:et elprisetjustnu.se och visar Nord Pool-spotpriset för hela elområdet, <strong>inkl. 25% moms</strong> – inte din exakta adress. Precis som Tibbers eget pris ingår varken nätavgift eller energiskatt (de tas alltid ut separat av ditt nätbolag, oavsett elhandelsbolag). Både postnummer- och platsgissningen är dessutom grova uppskattningar, särskilt nära en elområdesgräns. Priset kan skilja sig från vad du faktiskt betalar, t.ex. om du har fastpris eller ett annat påslag än ren spotprisvidarefakturering.</span>
       </div>`;
 }
 
@@ -1241,7 +1258,7 @@ function renderHome(){
         <span class="unit">${settings.unit === "kr" ? "kr/kWh" : "öre/kWh"}</span>
       </div>
       <div class="hero-msg">${escapeHtml(msg)}</div>
-      <div class="hero-sub">Perioden ${fmtTime(data.current.startsAt)} – nu</div>
+      <div class="hero-sub">Perioden ${fmtTime(data.current.startsAt)} – nu · inkl. moms</div>
       <div class="hero-strip" aria-hidden="true">
         <div class="track">
           <div class="seg" style="left:0%; width:33.3%; background:rgba(0,0,0,.14);"></div>
@@ -1258,7 +1275,7 @@ function renderHome(){
       <div class="glyph" style="color:var(--text-faint);">${iconInfo()}</div>
       <div class="body">
         <div class="title">Källa: elprisetjustnu.se</div>
-        <div class="desc">Nord Pool-spotpris för elområde ${escapeHtml(zoneLabel(state.zone))}, uppräknat med uppskattad energiskatt och moms – inte din exakta adress. Ditt faktiska pris kan skilja sig beroende på elbolag, avtalstyp (t.ex. fastpris), nätavgift och eventuellt påslag.</div>
+        <div class="desc">Nord Pool-spotpris för elområde ${escapeHtml(zoneLabel(state.zone))}, inkl. 25% moms (precis som Tibbers pris) – inte din exakta adress, och inte nätavgift eller energiskatt (tas alltid ut separat av nätbolaget). Ditt faktiska pris kan skilja sig beroende på elbolag, avtalstyp (t.ex. fastpris) och eventuellt påslag.</div>
       </div>
     </div>` : ""}
 
@@ -1313,11 +1330,15 @@ function renderNextCheapCard(currentTone, next, hasTomorrow, settings){
   }
   if(next){
     const start = new Date(next.startsAt);
+    const now = new Date();
+    // Förtydliga om perioden gäller idag eller imorgon, så den aldrig kan
+    // förväxlas med raden för samma klockslag i dagens tabell nedanför.
+    const isTomorrow = start.toDateString() !== now.toDateString();
     return `<div class="card next-card" style="margin-top:14px;">
       <div class="glyph">${iconClock()}</div>
       <div class="body">
-        <div class="title">Vänta till ${fmtClock(start)}</div>
-        <div class="desc">Då sjunker priset till ${formatPrice(next.total, settings.unit)}.</div>
+        <div class="title">Vänta till ${isTomorrow ? "imorgon " : ""}${fmtClock(start)}</div>
+        <div class="desc">Då sjunker priset till ${formatPrice(next.total, settings.unit)}${isTomorrow ? " (imorgondagens pris)" : ""}.</div>
       </div>
     </div>`;
   }
@@ -1452,7 +1473,9 @@ function renderSettings(){
           </div>
           <button class="btn btn-danger" id="btn-disconnect">Koppla från</button>
         </div>
-        ${state.mode === "zone" ? `<div class="hint" style="margin-top:12px;">Baserat på elprisetjustnu.se för ditt valda elområde, inkl. uppskattad energiskatt och moms. Inte din exakta adress eller ditt faktiska elpris.</div>` : ""}
+        ${state.mode === "zone"
+          ? `<div class="hint" style="margin-top:12px;">Priset är elprisetjustnu.se:s spotpris för ditt valda elområde, inkl. 25% moms. Inte din exakta adress, och inte nätavgift eller energiskatt (de tas alltid ut separat av nätbolaget, oavsett elhandelsbolag).</div>`
+          : `<div class="hint" style="margin-top:12px;">Priset kommer direkt från Tibbers API och är inkl. moms, precis som i Tibber-appen. Nätavgift och energiskatt ingår inte – de tas alltid ut separat av ditt nätbolag och syns inte i elhandelsbolagets pris.</div>`}
         ${state.mode === "tibber" && homes.length > 1 ? `
         <div class="field" style="margin-top:16px;">
           <label for="home-select">Hem</label>
