@@ -239,3 +239,19 @@ alltid ligger i framtiden.
 ## Licens
 
 Fri att använda och anpassa efter eget behov.
+
+## Realtidsmätning (Tibber Pulse / P1) – sedan 2.1.0
+
+I Tibber-läget visar översikten ett realtidskort om hemmet har en Pulse (eller Watty):
+
+- **Effekt just nu** (W/kW), samt snitt och högsta effekt idag.
+- **Förbrukning och kostnad hittills idag** (kommer direkt från Tibber).
+- **Uppskattad kostnad kommande timme:** medeleffekten de senaste 5 minuterna × spotpriset
+  (inkl. moms) för kommande 60 minuter, kvart för kvart. Är inte hela timmen prissatt än
+  (t.ex. sent på kvällen före morgondagens priser publicerats) antas resten ha samma snittpris.
+  Det är en prognos – nätavgift och energiskatt ingår inte.
+
+Tekniskt: GraphQL-prenumerationen `liveMeasurement` över WebSocket (`graphql-transport-ws`, token i
+`connection_init`, URL från `viewer.websocketSubscriptionUrl`). Appen återansluter automatiskt och
+pausar när fliken är dold. Utan Pulse, eller i elområdesläget, visas bara en informationsruta.
+Token sparas bara i din webbläsare, precis som tidigare.

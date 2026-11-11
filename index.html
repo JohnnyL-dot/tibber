@@ -1,10 +1,18 @@
 <!DOCTYPE html>
 <!--
   Elpriskoll
-  Version: 2.0.0
-  Senast ändrad: 2026-09-22
+  Version: 2.1.0
+  Senast ändrad: 2026-11-11
 
   Ändringslogg (senaste överst):
+  - 2.1.0 (2026-11-11): Realtidsmätning från Tibber Pulse/P1. Ett nytt kort på
+    översikten (endast Tibber-läget) visar aktuell effekt (W/kW), förbrukning
+    och kostnad hittills idag, samt en UPPSKATTAD kostnad för kommande timme:
+    medeleffekten de senaste 5 minuterna × spotpriset (inkl. moms) för de
+    kommande 60 minuterna, kvart för kvart. Data kommer via Tibbers
+    WebSocket-prenumeration (liveMeasurement) direkt i webbläsaren med din
+    egen token. Kopplar upp sig automatiskt, återansluter vid avbrott och
+    pausar när fliken är dold. Uppskattningen är en prognos, inte en faktura.
   - 2.0.0 (2026-09-22): Två rättelser: (1) Elområdesläget räknade tidigare
     upp priset med BÅDE energiskatt och moms, vilket inte matchar vad Tibbers
     "total" faktiskt representerar (spotpris + moms – energiskatt och
@@ -284,6 +292,25 @@ input:focus, select:focus{border-color:var(--accent);}
 .next-card .title{font-weight:700; font-size:15.5px;}
 .next-card .desc{font-size:13.5px; color:var(--text-dim); margin-top:2px;}
 
+/* ============ Realtid (Pulse) ============ */
+.live-card{margin-top:14px; padding:18px 20px;}
+.live-head{display:flex; align-items:center; justify-content:space-between; font-size:13px; font-weight:600; color:var(--text-dim);}
+.live-dot{display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--text-faint); margin-right:7px;}
+.live-dot.on{background:var(--green); animation:pulse 1.6s ease-in-out infinite;}
+.live-dot.err{background:var(--red);}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+.live-power{display:flex; align-items:baseline; gap:8px; margin:10px 0 4px;}
+.live-power .num{font-size:clamp(34px,9vw,44px); font-weight:700; line-height:1; letter-spacing:-.02em; font-variant-numeric:tabular-nums;}
+.live-power .unit{font-size:15px; font-weight:600; color:var(--text-dim);}
+.live-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px;}
+.live-cell{background:var(--surface-2); border-radius:12px; padding:11px 13px;}
+.live-cell .k{font-size:11.5px; color:var(--text-faint); font-weight:600;}
+.live-cell .v{font-size:17px; font-weight:700; margin-top:2px; font-variant-numeric:tabular-nums;}
+.live-est{margin-top:12px; border:1px dashed var(--border); border-radius:12px; padding:12px 14px;}
+.live-est .k{font-size:12px; color:var(--text-faint); font-weight:600;}
+.live-est .v{font-size:22px; font-weight:700; margin-top:2px; font-variant-numeric:tabular-nums;}
+.live-est .d{font-size:12px; color:var(--text-dim); margin-top:4px; line-height:1.45;}
+
 /* ============ Meta row ============ */
 .meta-row{display:flex; align-items:center; justify-content:space-between; margin-top:14px; padding:0 2px;}
 .meta-row .updated{font-size:12.5px; color:var(--text-faint);}
@@ -361,8 +388,8 @@ footer.legal{padding:10px 20px 40px; text-align:center; font-size:11.5px; color:
    Ingen token eller autentiseringsuppgift lagras i källkoden.
    ========================================================================= */
 
-const APP_VERSION = "2.0.0";
-const APP_BUILD_DATE = "2026-09-22";
+const APP_VERSION = "2.1.0";
+const APP_BUILD_DATE = "2026-11-11";
 
 const TIBBER_ENDPOINT = "https://api.tibber.com/v1-beta/gql";
 const ZONE_API_BASE = "https://www.elprisetjustnu.se/api/v1/prices";
@@ -563,10 +590,12 @@ const VALIDATE_QUERY = `query { viewer { login name } }`;
 const PRICES_QUERY = `
 query {
   viewer {
+    websocketSubscriptionUrl
     homes {
       id
       appNickname
       address { address1 }
+      features { realTimeConsumptionEnabled }
       currentSubscription {
         priceInfo(resolution: QUARTER_HOURLY) {
           current { total energy tax startsAt level }
@@ -590,6 +619,7 @@ async function fetchPrices(token){
   if(!homes.length){
     throw {kind:"nohomes", message:"Inget hem hittades på ditt Tibber-konto."};
   }
+  state.wsUrl = (data && data.viewer && data.viewer.websocketSubscriptionUrl) || null;
   return homes;
 }
 
@@ -749,6 +779,193 @@ function currentPeriodKey(period){
   return period ? period.startsAt : null;
 }
 
+/* ---------------------------- Realtid: Tibber Pulse / P1 ----------------------------
+   Tibber levererar realtidsmätningen via en GraphQL-prenumeration (liveMeasurement)
+   över WebSocket (protokoll "graphql-transport-ws"; token skickas i connection_init).
+   Fungerar bara om hemmet har en Pulse/Watty (features.realTimeConsumptionEnabled). */
+const DEFAULT_WS_URL = "wss://websocket-api.tibber.com/v1-beta/gql/subscriptions";
+const LIVE_QUERY = `subscription($homeId: ID!){
+  liveMeasurement(homeId: $homeId){
+    timestamp power powerProduction accumulatedConsumption accumulatedCost
+    currency minPower averagePower maxPower
+  }
+}`;
+const LIVE_SMOOTH_MS = 5 * 60 * 1000;
+const LIVE_STALE_MS = 45 * 1000;
+state.live = {status:"off", homeId:null, ws:null, samples:[], last:null, lastAt:0, error:null, retry:0, retryTimer:null, staleTimer:null};
+
+function periodEndMs(periods, i){
+  const start = new Date(periods[i].startsAt).getTime();
+  if(periods[i].endsAt) return new Date(periods[i].endsAt).getTime();
+  if(i + 1 < periods.length) return new Date(periods[i+1].startsAt).getTime();
+  if(i > 0) return start + (start - new Date(periods[i-1].startsAt).getTime());
+  return start + 15*60*1000;
+}
+// Uppskattad kostnad kommande 60 min om effekten (avgW) hålls konstant.
+// Summerar kWh × pris per prisperiod som överlappar [now, now+60 min].
+function estimateNextHour(periods, now, avgW){
+  if(!periods || !periods.length || !(avgW >= 0)) return null;
+  const t0 = now.getTime(), t1 = t0 + 3600*1000;
+  let covMs = 0, cost = 0, kwhCov = 0;
+  for(let i=0;i<periods.length;i++){
+    const a = new Date(periods[i].startsAt).getTime(), b = periodEndMs(periods, i);
+    const ov = Math.min(b, t1) - Math.max(a, t0);
+    if(ov > 0){
+      const kwh = (avgW/1000) * (ov/3600000);
+      cost += kwh * periods[i].total; kwhCov += kwh; covMs += ov;
+    }
+  }
+  if(covMs <= 0) return null;
+  const partial = covMs < 3600000 - 1000;
+  const kwhTotal = (avgW/1000);
+  const avgPrice = kwhCov > 0 ? cost / kwhCov : 0;
+  if(partial) cost = kwhTotal * avgPrice; // fyll ut resten med snittpriset för de kända minuterna
+  return {kwh: kwhTotal, cost, avgPrice, partial, coveredMin: Math.round(covMs/60000)};
+}
+function liveAvgPower(live, nowMs){
+  const recent = live.samples.filter(x => nowMs - x.t <= LIVE_SMOOTH_MS);
+  if(!recent.length) return null;
+  return recent.reduce((a,x) => a + x.power, 0) / recent.length;
+}
+function fmtPower(w){
+  if(w >= 1000) return {num:(w/1000).toFixed(2).replace(".", ","), unit:"kW"};
+  return {num:String(Math.round(w)), unit:"W"};
+}
+function fmtKr(v){ return v.toFixed(2).replace(".", ","); }
+function fmtKwhShort(v){ return (v < 10 ? v.toFixed(2) : v.toFixed(1)).replace(".", ","); }
+
+function stopLive(resetData){
+  const L = state.live;
+  if(L.retryTimer){ clearTimeout(L.retryTimer); L.retryTimer = null; }
+  if(L.staleTimer){ clearInterval(L.staleTimer); L.staleTimer = null; }
+  if(L.ws){
+    const ws = L.ws; L.ws = null;
+    ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null;
+    try{ ws.close(); }catch(e){}
+  }
+  L.status = "off";
+  if(resetData){ L.samples = []; L.last = null; L.lastAt = 0; L.error = null; L.retry = 0; L.homeId = null; }
+}
+function startLive(){
+  const L = state.live;
+  if(state.mode !== "tibber" || !state.token || !state.data || !state.data.realtime || !state.data.homeId) return;
+  if(typeof WebSocket === "undefined") return;
+  if(L.ws && L.homeId === state.data.homeId) return;
+  if(L.homeId && L.homeId !== state.data.homeId) stopLive(true); else stopLive(false);
+  L.homeId = state.data.homeId;
+  L.status = "connecting"; L.error = null;
+  updateLiveCard();
+  let ws;
+  try{
+    ws = new WebSocket(state.wsUrl || (state.data && state.data.wsUrl) || DEFAULT_WS_URL, "graphql-transport-ws");
+  }catch(e){
+    L.status = "error"; L.error = "Kunde inte öppna realtidsanslutningen."; updateLiveCard(); scheduleLiveRetry(); return;
+  }
+  L.ws = ws;
+  ws.onopen = () => { ws.send(JSON.stringify({type:"connection_init", payload:{token: state.token}})); };
+  ws.onmessage = (ev) => {
+    let m; try{ m = JSON.parse(ev.data); }catch(e){ return; }
+    if(m.type === "connection_ack"){
+      ws.send(JSON.stringify({id:"1", type:"subscribe", payload:{query: LIVE_QUERY, variables:{homeId: L.homeId}}}));
+    }else if(m.type === "ping"){
+      ws.send(JSON.stringify({type:"pong"}));
+    }else if(m.type === "next"){
+      const lm = m.payload && m.payload.data && m.payload.data.liveMeasurement;
+      if(lm && typeof lm.power === "number"){
+        const now = Date.now();
+        L.last = lm; L.lastAt = now; L.status = "live"; L.error = null; L.retry = 0;
+        L.samples.push({t: now, power: lm.power});
+        L.samples = L.samples.filter(x => now - x.t <= 2*LIVE_SMOOTH_MS);
+        updateLiveCard();
+      }
+    }else if(m.type === "error" || m.type === "connection_error"){
+      const msg = (m.payload && (m.payload[0] && m.payload[0].message || m.payload.message)) || "";
+      L.status = "error";
+      L.error = "Tibber avvisade realtidsprenumerationen" + (msg ? " (" + msg + ")" : "") + ".";
+      updateLiveCard();
+    }
+  };
+  ws.onerror = () => { /* onclose följer och hanterar detta */ };
+  ws.onclose = () => {
+    if(L.ws !== ws) return;
+    L.ws = null;
+    if(L.status !== "error") { L.status = "error"; L.error = L.error || "Realtidsanslutningen bröts. Försöker igen …"; }
+    updateLiveCard();
+    scheduleLiveRetry();
+  };
+  if(!L.staleTimer) L.staleTimer = setInterval(updateLiveCard, 5000);
+}
+function scheduleLiveRetry(){
+  const L = state.live;
+  if(L.retryTimer || state.mode !== "tibber") return;
+  const delay = Math.min(60000, 3000 * Math.pow(2, L.retry++));
+  L.retryTimer = setTimeout(() => { L.retryTimer = null; L.ws = null; startLive(); }, delay);
+}
+function ensureLive(){
+  if(state.mode === "tibber" && state.data && state.data.realtime && !document.hidden) startLive();
+}
+
+function renderLiveCard(){
+  if(state.mode !== "tibber") {
+    return `<div class="card next-card" style="margin-top:14px;" role="note">
+      <div class="glyph" style="color:var(--text-faint);">${iconInfo()}</div>
+      <div class="body"><div class="title">Realtidsmätning</div>
+      <div class="desc">Förbrukning från Tibber Pulse/P1 visas när du loggar in med din Tibber-token.</div></div></div>`;
+  }
+  const data = state.data;
+  if(!data) return "";
+  if(!data.realtime){
+    return `<div class="card next-card" style="margin-top:14px;" role="note">
+      <div class="glyph" style="color:var(--text-faint);">${iconInfo()}</div>
+      <div class="body"><div class="title">Ingen Pulse hittades</div>
+      <div class="desc">Det här hemmet har ingen aktiv Tibber Pulse/Watty kopplad (eller så är realtidsdata inte aktiverad i Tibber-appen).</div></div></div>`;
+  }
+  const L = state.live, now = Date.now();
+  const stale = L.last && (now - L.lastAt > LIVE_STALE_MS);
+  const dotCls = L.status === "live" && !stale ? "on" : (L.status === "error" || stale ? "err" : "");
+  const statusTxt = L.status === "live" && !stale ? "Direkt från Pulse"
+    : stale ? "Ingen ny data på " + Math.round((now - L.lastAt)/1000) + " s"
+    : L.status === "error" ? "Frånkopplad"
+    : "Ansluter …";
+  let body = "";
+  if(L.last){
+    const lm = L.last, pw = fmtPower(lm.power);
+    const avgW = liveAvgPower(L, now);
+    const est = avgW === null ? null : estimateNextHour((data.today || []).concat(data.tomorrow || []), new Date(now), avgW);
+    const cur = lm.currency === "SEK" || !lm.currency ? "kr" : lm.currency;
+    const prod = lm.powerProduction > 0 ? `<div class="live-cell"><div class="k">Produktion nu</div><div class="v">${(() => { const f = fmtPower(lm.powerProduction); return f.num + " " + f.unit; })()}</div></div>` : "";
+    body = `
+      <div class="live-power"><span class="num">${pw.num}</span><span class="unit">${pw.unit} just nu</span></div>
+      <div class="live-grid">
+        <div class="live-cell"><div class="k">Förbrukning idag</div><div class="v">${typeof lm.accumulatedConsumption === "number" ? fmtKwhShort(lm.accumulatedConsumption) + " kWh" : "–"}</div></div>
+        <div class="live-cell"><div class="k">Kostnad hittills idag</div><div class="v">${typeof lm.accumulatedCost === "number" ? fmtKr(lm.accumulatedCost) + " " + escapeHtml(cur) : "–"}</div></div>
+        ${typeof lm.averagePower === "number" ? `<div class="live-cell"><div class="k">Snitt idag</div><div class="v">${(() => { const f = fmtPower(lm.averagePower); return f.num + " " + f.unit; })()}</div></div>` : ""}
+        ${typeof lm.maxPower === "number" ? `<div class="live-cell"><div class="k">Högsta idag</div><div class="v">${(() => { const f = fmtPower(lm.maxPower); return f.num + " " + f.unit; })()}</div></div>` : ""}
+        ${prod}
+      </div>
+      <div class="live-est" role="note">
+        <div class="k">Uppskattad kostnad kommande timme</div>
+        <div class="v">${est ? "≈ " + fmtKr(est.cost) + " kr" : "–"}</div>
+        <div class="d">${est
+          ? `Om du fortsätter förbruka som de senaste 5 minuterna (snitt ${(() => { const f = fmtPower(avgW); return f.num + " " + f.unit; })()} ≈ ${fmtKwhShort(est.kwh)} kWh) till spotpriset ${formatPrice(est.avgPrice, state.settings.unit)} inkl. moms, kvart för kvart kl. ${fmtClock(new Date(now))}–${fmtClock(new Date(now + 3600000))}.${est.partial ? " Priser för hela timmen är inte publicerade än – resten antas ha samma snittpris." : ""} Endast elpris – nätavgift och energiskatt ingår inte. En prognos, inte en faktura.`
+          : "Väntar på mätdata eller prisdata."}</div>
+      </div>`;
+  }else if(L.status === "error"){
+    body = `<div class="hint" style="margin-top:12px; color:var(--text-dim);">${escapeHtml(L.error || "Kunde inte ansluta till realtidsdata.")} Kontrollera att din Pulse är online i Tibber-appen. Prisdelen av appen fungerar som vanligt.</div>`;
+  }else{
+    body = `<div class="hint" style="margin-top:12px; color:var(--text-dim);">Väntar på första mätvärdet från Pulse (kommer vanligtvis inom några sekunder) …</div>`;
+  }
+  return `<div class="live-head"><span><span class="live-dot ${dotCls}"></span>Realtid · Tibber Pulse</span><span>${escapeHtml(statusTxt)}</span></div>${body}`;
+}
+function updateLiveCard(){
+  const el = document.getElementById("live-card");
+  if(el) el.innerHTML = renderLiveCard();
+}
+document.addEventListener("visibilitychange", () => {
+  if(document.hidden){ if(state.live.ws) stopLive(false); }
+  else ensureLive();
+});
+
 /* ---------------------------- Load flow ---------------------------- */
 async function boot(){
   applyTheme();
@@ -827,6 +1044,8 @@ async function refreshPrices(isInitial){
       payload = {
         homes: homes.map(h => ({id:h.id, name:h.appNickname || (h.address && h.address.address1) || "Hem"})),
         homeId: home.id,
+        realtime: !!(home.features && home.features.realTimeConsumptionEnabled),
+        wsUrl: state.wsUrl || null,
         current: info.current,
         today: info.today,
         tomorrow: info.tomorrow
@@ -846,6 +1065,7 @@ async function refreshPrices(isInitial){
     state.error = null;
     saveCache(payload, state.lastUpdated.getTime());
     announce("Elpriset har uppdaterats.");
+    ensureLive();
   }catch(err){
     const message = (err && err.message) || "Kunde inte hämta elpriset just nu.";
     state.error = {message, kind: err && err.kind};
@@ -937,6 +1157,7 @@ function handleDisconnect(){
   state.error = null;
   if(state.refreshTimer) clearInterval(state.refreshTimer);
   if(state.quarterRefreshTimer) clearTimeout(state.quarterRefreshTimer);
+  stopLive(true);
   state.view = "connect";
   render();
   announce("Du har kopplat från.");
@@ -1269,6 +1490,8 @@ function renderHome(){
         <div class="labels"><span>Bra</span><span>Mindre bra</span><span>Dyrt</span></div>
       </div>
     </section>
+
+    <section class="card live-card" id="live-card" aria-label="Realtidsmätning och uppskattad kostnad">${renderLiveCard()}</section>
 
     ${state.mode === "zone" ? `
     <div class="card next-card" style="margin-top:14px;" role="note">
